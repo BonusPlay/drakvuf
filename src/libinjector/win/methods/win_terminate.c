@@ -101,15 +101,11 @@ event_response_t handle_win_terminate(drakvuf_t drakvuf, drakvuf_trap_info_t* in
 
             PRINT_DEBUG("Process %d terminated successfully!\n", injector->terminate_pid);
 
-            memcpy(info->regs, &injector->x86_saved_regs, sizeof(x86_registers_t));
-            event = VMI_EVENT_RESPONSE_SET_REGISTERS;
-            break;
-        }
-        case STEP4:
-        {
             drakvuf_remove_trap(drakvuf, info->trap, NULL);
             drakvuf_interrupt(drakvuf, SIGDRAKVUFERROR);
-            event = VMI_EVENT_RESPONSE_NONE;
+
+            memcpy(info->regs, &injector->x86_saved_regs, sizeof(x86_registers_t));
+            event = VMI_EVENT_RESPONSE_SET_REGISTERS;
             break;
         }
         default:
@@ -123,11 +119,16 @@ event_response_t handle_win_terminate(drakvuf_t drakvuf, drakvuf_trap_info_t* in
 
 static event_response_t cleanup(injector_t injector, drakvuf_trap_info_t* info)
 {
+    drakvuf_t drakvuf = injector->drakvuf;
+
     PRINT_DEBUG("Exiting prematurely\n");
 
     if (injector->rc == INJECTOR_SUCCEEDED)
         injector->rc = INJECTOR_FAILED;
 
+    drakvuf_remove_trap(drakvuf, info->trap, NULL);
+    drakvuf_interrupt(drakvuf, SIGDRAKVUFERROR);
+
     memcpy(info->regs, &injector->x86_saved_regs, sizeof(x86_registers_t));
-    return override_step(injector, STEP4, VMI_EVENT_RESPONSE_SET_REGISTERS);
+    return VMI_EVENT_RESPONSE_SET_REGISTERS;
 }
