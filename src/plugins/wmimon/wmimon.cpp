@@ -104,7 +104,7 @@
 
 #include "wmimon.h"
 #include "private.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 
 bool FAILED(unsigned long rax)
 {
@@ -402,9 +402,9 @@ event_response_t ExecMethod_return_handler(drakvuf_t drakvuf, drakvuf_trap_info_
 
     wmi_lock.unlock();
 
-    fmt::print(plugin->m_output_format, "wmimon", drakvuf, info,
-        keyval("Object", fmt::Qstr(reinterpret_cast<const char*>(object->contents))),
-        keyval("Function", fmt::Qstr(reinterpret_cast<const char*>(method->contents)))
+    slog::emit("wmimon", drakvuf, info,
+        slog::attr("Object", object),
+        slog::attr("Function", method)
     );
 
     vmi_free_unicode_str(object);
@@ -479,8 +479,8 @@ event_response_t GetObject_return_handler(drakvuf_t drakvuf, drakvuf_trap_info_t
         return VMI_EVENT_RESPONSE_NONE;
     }
 
-    fmt::print(plugin->m_output_format, "wmimon", drakvuf, info,
-        keyval("Object", fmt::Qstr(reinterpret_cast<const char*>(object->contents)))
+    slog::emit("wmimon", drakvuf, info,
+        slog::attr("Object", object)
     );
 
     vmi_free_unicode_str(object);
@@ -553,8 +553,8 @@ event_response_t ExecQuery_return_handler(drakvuf_t drakvuf, drakvuf_trap_info_t
         return VMI_EVENT_RESPONSE_NONE;
     }
 
-    fmt::print(plugin->m_output_format, "wmimon", drakvuf, info,
-        keyval("Command", fmt::Qstr(reinterpret_cast<const char*>(command->contents)))
+    slog::emit("wmimon", drakvuf, info,
+        slog::attr("Command", command)
     );
 
     vmi_free_unicode_str(command);
@@ -627,8 +627,8 @@ event_response_t ConnectServer_return_handler(drakvuf_t drakvuf, drakvuf_trap_in
         return VMI_EVENT_RESPONSE_NONE;
     }
 
-    fmt::print(plugin->m_output_format, "wmimon", drakvuf, info,
-        keyval("Resource", fmt::Qstr(reinterpret_cast<const char*>(resource->contents)))
+    slog::emit("wmimon", drakvuf, info,
+        slog::attr("Resource", resource)
     );
 
     vmi_free_unicode_str(resource);
@@ -774,8 +774,8 @@ event_response_t CoCreateInstanse_handler(drakvuf_t drakvuf, drakvuf_trap_info_t
     return VMI_EVENT_RESPONSE_NONE;
 }
 
-wmimon::wmimon(drakvuf_t drakvuf, const wmimon_config* c, output_format_t output)
-    : pluginex(drakvuf, output)
+wmimon::wmimon(drakvuf_t drakvuf, const wmimon_config* c)
+    : pluginex(drakvuf)
     , m_offsets(new size_t[__OFFSET_MAX])
 {
     if (!drakvuf_get_kernel_struct_members_array_rva(drakvuf, offset_names, __OFFSET_MAX, m_offsets))

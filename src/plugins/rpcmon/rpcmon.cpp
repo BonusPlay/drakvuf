@@ -110,7 +110,7 @@
 #include <optional>
 #include <memory>
 
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 #include "rpcmon.h"
 #include "private.h"
 
@@ -135,7 +135,7 @@ struct _GUID
     {
         const int sz = 64;
         char stream[sz] = {0};
-        snprintf(stream, sz, "\"%08X-%04hX-%04hX-%02hhX%02hhX-%02hhX%02hhX%02hhX%02hhX%02hhX%02hhX\"",
+        snprintf(stream, sz, "%08X-%04hX-%04hX-%02hhX%02hhX-%02hhX%02hhX%02hhX%02hhX%02hhX%02hhX",
             Data1, Data2, Data3, Data4[0], Data4[1],
             Data4[2], Data4[3], Data4[4],
             Data4[5], Data4[6], Data4[7]);
@@ -353,59 +353,60 @@ event_response_t rpcmon::usermode_return_hook_cb(drakvuf_t drakvuf, drakvuf_trap
     if (!params->verifyResultCallParams(drakvuf, info))
         return VMI_EVENT_RESPONSE_NONE;
 
-    std::vector<std::pair<std::string, fmt::Rstr<std::string>>> fmt_extra{};
-    std::vector<std::pair<std::string, fmt::Nval<uint64_t>>> fmt_extra_num;
-    std::vector<fmt::Rstr<std::string>> fmt_args{};
+    std::vector<slog::keyval> fmt_extra{};
+    std::vector<slog::keyval> fmt_extra_num;
+    std::vector<slog::keyval> fmt_args{};
     {
         const auto& args = params->arguments;
-        const auto& printers = params->target->argument_printers;
-        for (auto [arg, printer] = std::tuple(std::cbegin(args), std::cbegin(printers));
-            arg != std::cend(args) && printer != std::cend(printers);
-            ++arg, ++printer)
+        const auto& specs = params->target->arguments;
+        for (auto [arg, spec] = std::tuple(std::cbegin(args), std::cbegin(specs));
+            arg != std::cend(args) && spec != std::cend(specs);
+            ++arg, ++spec)
         {
-            fmt_args.push_back(fmt::Rstr((*printer)->print(drakvuf, info, *arg)));
+            fmt_args.push_back(slog::attr(
+                spec->name, decode_argument(drakvuf, info, *arg, *spec)));
 
-            if (std::string("pStubDescriptor") == (*printer)->get_name())
+            if (spec->name == "pStubDescriptor")
             {
                 auto r = parse_MIDL_STUB_DESC(drakvuf, info, *arg);
                 if (!r) continue;
 
-                fmt_extra.push_back(std::make_pair("InterfaceId", r->InterfaceIdGuid));
-                fmt_extra.push_back(std::make_pair("TransferSyntax", r->TransferSyntaxGuid));
+                fmt_extra.push_back(slog::attr("InterfaceId", r->InterfaceIdGuid));
+                fmt_extra.push_back(slog::attr("TransferSyntax", r->TransferSyntaxGuid));
             }
-            else if (std::string("pStubProxy") == (*printer)->get_name())
+            else if (spec->name == "pStubProxy")
             {
                 auto r = parse_MIDL_STUBLESS_PROXY_INFO(drakvuf, info, *arg);
                 if (!r) continue;
 
-                fmt_extra.push_back(std::make_pair("InterfaceId", r->InterfaceIdGuid));
-                fmt_extra.push_back(std::make_pair("TransferSyntax", r->TransferSyntaxGuid));
+                fmt_extra.push_back(slog::attr("InterfaceId", r->InterfaceIdGuid));
+                fmt_extra.push_back(slog::attr("TransferSyntax", r->TransferSyntaxGuid));
             }
-            else if (std::string("pFormat") == (*printer)->get_name())
+            else if (spec->name == "pFormat")
             {
                 auto r = parse_FORMAT_STRING(drakvuf, info, *arg);
                 if (!r) continue;
 
-                fmt_extra_num.push_back(std::make_pair("ProcedureNumber", fmt::Nval(*r)));
+                fmt_extra_num.push_back(slog::attr("ProcedureNumber", slog::number(*r)));
             }
-            else if (std::string("RpcMessage") == (*printer)->get_name())
+            else if (spec->name == "RpcMessage")
             {
                 auto r = parse_RPC_MESSAGE(drakvuf, info, *arg);
                 if (!r) continue;
 
-                fmt_extra_num.push_back(std::make_pair("ProcNum", fmt::Nval(r->ProcNum)));
-                fmt_extra.push_back(std::make_pair("InterfaceId", r->InterfaceIdGuid));
+                fmt_extra_num.push_back(slog::attr("ProcNum", slog::number(r->ProcNum)));
+                fmt_extra.push_back(slog::attr("InterfaceId", r->InterfaceIdGuid));
             }
         }
     }
 
-    fmt::print(m_output_format, "rpcmon", drakvuf, info,
-        keyval("Event", fmt::Qstr("api_called")),
-        keyval("CalledFrom", fmt::Xval(info->regs->rip)),
-        keyval("ReturnValue", fmt::Xval(info->regs->rax)),
-        keyval("Arguments", fmt_args),
-        keyval("Extra", fmt_extra),
-        keyval("ExtraNum", fmt_extra_num)
+    slog::emit("rpcmon", drakvuf, info,
+        slog::attr("Event", slog::text("api_called")),
+        slog::attr("CalledFrom", slog::hex(info->regs->rip)),
+        slog::attr("ReturnValue", slog::hex(info->regs->rax)),
+        slog::attr("Arguments", fmt_args),
+        slog::attr("Extra", fmt_extra),
+        slog::attr("ExtraNum", fmt_extra_num)
     );
 
     auto hookID = make_hook_id(info, params->target_rsp);
@@ -443,8 +444,8 @@ static event_response_t usermode_hook_cb(drakvuf_t drakvuf, drakvuf_trap_info* i
     }
 
     std::vector<uint64_t> arguments;
-    arguments.reserve(target->argument_printers.size());
-    for (size_t i = 1; i <= target->argument_printers.size(); i++)
+    arguments.reserve(target->arguments.size());
+    for (size_t i = 1; i <= target->arguments.size(); i++)
     {
         uint64_t argument = drakvuf_get_function_argument(drakvuf, info, i);
         arguments.push_back(argument);
@@ -480,38 +481,38 @@ static void on_dll_hooked(drakvuf_t drakvuf, const dll_view_t* dll, const std::v
 
 static auto rpc_call_args()
 {
-    PrinterConfig config{};
-    config.numeric_format = PrinterConfig::NumericFormat::DECIMAL;
+    argument_options config{};
+    config.format = argument_options::number_format::decimal;
 
-    std::vector<std::unique_ptr<ArgumentPrinter>> args;
-    args.emplace_back(std::make_unique<ArgumentPrinter>("pStubDescriptor", config));
-    args.emplace_back(std::make_unique<ArgumentPrinter>("pFormat", config));
-    return args;
+    return std::vector<argument_spec>{
+        {"pStubDescriptor", argument_kind::number, config},
+        {"pFormat", argument_kind::number, config},
+    };
 }
 
 static auto rpc_call3_args()
 {
-    PrinterConfig config{};
-    config.numeric_format = PrinterConfig::NumericFormat::DECIMAL;
+    argument_options config{};
+    config.format = argument_options::number_format::decimal;
 
-    std::vector<std::unique_ptr<ArgumentPrinter>> args;
-    args.emplace_back(std::make_unique<ArgumentPrinter>("pStubProxy", config));
-    args.emplace_back(std::make_unique<ArgumentPrinter>("ProcedureNumber", config));
-    return args;
+    return std::vector<argument_spec>{
+        {"pStubProxy", argument_kind::number, config},
+        {"ProcedureNumber", argument_kind::number, config},
+    };
 }
 
 static auto i_rpc_args()
 {
-    PrinterConfig config{};
-    config.numeric_format = PrinterConfig::NumericFormat::DECIMAL;
+    argument_options config{};
+    config.format = argument_options::number_format::decimal;
 
-    std::vector<std::unique_ptr<ArgumentPrinter>> args;
-    args.emplace_back(std::make_unique<ArgumentPrinter>("RpcMessage", config));
-    return args;
+    return std::vector<argument_spec>{
+        {"RpcMessage", argument_kind::number, config},
+    };
 }
 
-rpcmon::rpcmon(drakvuf_t drakvuf, output_format_t output)
-    : pluginex(drakvuf, output)
+rpcmon::rpcmon(drakvuf_t drakvuf)
+    : pluginex(drakvuf)
 {
     if (!drakvuf_are_userhooks_supported(drakvuf))
     {

@@ -102,7 +102,7 @@
  *                                                                         *
  ***************************************************************************/
 
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 
 #include "private.h"
 #include "win.h"
@@ -122,27 +122,42 @@ static uint64_t windows_tick_to_unix(long long windowsTicks)
 
 static auto build_security_descriptor(const win_objattrs_t& attrs)
 {
-    std::vector<flagsval> security_descriptor;
-    if (!attrs.security_flags.empty())
-        security_descriptor.emplace_back("Control", attrs.security_flags);
+    const auto build_acl = [](const std::vector<acl_entry_t>& acl)
+    {
+        std::vector<slog::value> result;
+        result.reserve(acl.size());
+        for (const auto& ace : acl)
+        {
+            std::vector<slog::keyval> fields;
+            fields.push_back(slog::attr("Type", ace.type));
+            fields.push_back(slog::attr("AccessMask", ace.access_mask));
+            fields.push_back(slog::attr("SID", ace.sid));
+            result.push_back(slog::value(std::move(fields)));
+        }
+        return slog::value(std::move(result));
+    };
+
+    std::vector<slog::keyval> security_descriptor;
+    if (attrs.security_flags)
+        security_descriptor.push_back(slog::attr("Control", *attrs.security_flags));
     if (!attrs.owner.empty())
-        security_descriptor.emplace_back("Owner", attrs.owner);
+        security_descriptor.push_back(slog::attr("Owner", attrs.owner));
     if (!attrs.group.empty())
-        security_descriptor.emplace_back("Group", attrs.group);
+        security_descriptor.push_back(slog::attr("Group", attrs.group));
     if (!attrs.sacl.empty())
-        security_descriptor.emplace_back("Sacl", attrs.sacl);
+        security_descriptor.push_back(slog::attr("Sacl", build_acl(attrs.sacl)));
     if (!attrs.dacl.empty())
-        security_descriptor.emplace_back("Dacl", attrs.dacl);
+        security_descriptor.push_back(slog::attr("Dacl", build_acl(attrs.dacl)));
     return security_descriptor;
 }
 
 void win_filetracer::print_file_obj_info(drakvuf_t drakvuf, drakvuf_trap_info_t* info, const win_objattrs_t& attrs)
 {
     auto security_descriptor = build_security_descriptor(attrs);
-    fmt::print(this->m_output_format, "filetracer", drakvuf, info,
-        keyval("FileName", fmt::Estr(attrs.file_path)),
-        flagsval("ObjectAttributes", attrs.obj_attrs),
-        keyval("SecurityDescriptor", security_descriptor)
+    slog::emit("filetracer", drakvuf, info,
+        slog::attr("FileName", slog::text(attrs.file_path)),
+        slog::attr("ObjectAttributes", attrs.obj_attrs),
+        slog::attr("SecurityDescriptor", security_descriptor)
     );
 }
 
@@ -154,30 +169,30 @@ void win_filetracer::print_create_file_obj_info(drakvuf_t drakvuf,
     win_data* params,
     uint64_t status)
 {
-    auto file_attrs = parse_flags(params->file_attrs, file_flags_and_attrs, this->m_output_format);
-    auto share_access = parse_flags(params->share_access, share_mode, this->m_output_format);
-    auto create_disposition = parse_flags(params->create_disposition, disposition, this->m_output_format);
-    auto create_opts = parse_flags(params->create_opts, create_options, this->m_output_format);
+    auto file_attrs = slog::flags(params->file_attrs, file_flags_and_attrs);
+    auto share_access = slog::flags(params->share_access, share_mode);
+    auto create_disposition = slog::flags(params->create_disposition, disposition);
+    auto create_opts = slog::flags(params->create_opts, create_options);
     auto desired_access = params->create_opts & FILE_DIRECTORY_FILE
-        ? parse_flags(params->desired_access, directory_ar, this->m_output_format)
-        : parse_flags(params->desired_access, file_ar, this->m_output_format);
+        ? slog::flags(params->desired_access, directory_ar)
+        : slog::flags(params->desired_access, file_ar);
     auto security_descriptor = build_security_descriptor(attrs);
-    std::optional<fmt::Nval<int>> io_information_opt;
+    std::optional<slog::value> io_information_opt;
     if (!status)
-        io_information_opt = fmt::Nval((int)io_information);
+        io_information_opt = slog::number((int)io_information);
 
-    fmt::print(this->m_output_format, "filetracer", drakvuf, info,
-        keyval("FileName", fmt::Estr(attrs.file_path)),
-        keyval("FileHandle", fmt::Xval(handle)),
-        flagsval("ObjectAttributes", attrs.obj_attrs),
-        keyval("IoStatusBlock", io_information_opt),
-        keyval("SecurityDescriptor", security_descriptor),
-        flagsval("DesiredAccess", desired_access),
-        flagsval("FileAttributes", file_attrs),
-        flagsval("ShareAccess", share_access),
-        flagsval("CreateDisposition", create_disposition),
-        flagsval("CreateOptions", create_opts),
-        keyval("Status", fmt::Xval(status))
+    slog::emit("filetracer", drakvuf, info,
+        slog::attr("FileName", slog::text(attrs.file_path)),
+        slog::attr("FileHandle", slog::hex(handle)),
+        slog::attr("ObjectAttributes", attrs.obj_attrs),
+        slog::attr("IoStatusBlock", io_information_opt),
+        slog::attr("SecurityDescriptor", security_descriptor),
+        slog::attr("DesiredAccess", desired_access),
+        slog::attr("FileAttributes", file_attrs),
+        slog::attr("ShareAccess", share_access),
+        slog::attr("CreateDisposition", create_disposition),
+        slog::attr("CreateOptions", create_opts),
+        slog::attr("Status", slog::hex(status))
     );
 }
 
@@ -189,24 +204,24 @@ void win_filetracer::print_open_file_obj_info(drakvuf_t drakvuf,
     win_data* params,
     uint64_t status)
 {
-    auto share_access = parse_flags(params->share_access, share_mode, this->m_output_format);
-    auto open_opts = parse_flags(params->open_opts, create_options, this->m_output_format);
+    auto share_access = slog::flags(params->share_access, share_mode);
+    auto open_opts = slog::flags(params->open_opts, create_options);
     auto desired_access = params->open_opts & FILE_DIRECTORY_FILE
-        ? parse_flags(params->desired_access, directory_ar, this->m_output_format)
-        : parse_flags(params->desired_access, file_ar, this->m_output_format);
-    std::optional<fmt::Nval<int>> io_information_opt;
+        ? slog::flags(params->desired_access, directory_ar)
+        : slog::flags(params->desired_access, file_ar);
+    std::optional<slog::value> io_information_opt;
     if (!status)
-        io_information_opt = fmt::Nval((int)io_information);
+        io_information_opt = slog::number((int)io_information);
 
-    fmt::print(this->m_output_format, "filetracer", drakvuf, info,
-        keyval("FileName", fmt::Estr(attrs.file_path)),
-        keyval("FileHandle", fmt::Xval(handle)),
-        flagsval("ObjectAttributes", attrs.obj_attrs),
-        keyval("IoStatusBlock", io_information_opt),
-        flagsval("DesiredAccess", desired_access),
-        flagsval("ShareAccess", share_access),
-        flagsval("OpenOptions", open_opts),
-        keyval("Status", fmt::Xval(status))
+    slog::emit("filetracer", drakvuf, info,
+        slog::attr("FileName", slog::text(attrs.file_path)),
+        slog::attr("FileHandle", slog::hex(handle)),
+        slog::attr("ObjectAttributes", attrs.obj_attrs),
+        slog::attr("IoStatusBlock", io_information_opt),
+        slog::attr("DesiredAccess", desired_access),
+        slog::attr("ShareAccess", share_access),
+        slog::attr("OpenOptions", open_opts),
+        slog::attr("Status", slog::hex(status))
     );
 }
 
@@ -229,11 +244,11 @@ std::tuple<bool, win_objattrs_t> win_filetracer::objattr_read(drakvuf_t drakvuf,
     // Read security descriptor
     //==========================
 
-    std::string security_flags;
+    std::optional<slog::value> security_flags;
     std::string owner;
     std::string group;
-    std::string sacl;
-    std::string dacl;
+    std::vector<acl_entry_t> sacl;
+    std::vector<acl_entry_t> dacl;
 
     // Get address of security descriptor
     addr_t security_descriptor = 0;
@@ -245,7 +260,7 @@ std::tuple<bool, win_objattrs_t> win_filetracer::objattr_read(drakvuf_t drakvuf,
         uint16_t se_ctrl = 0;
         ctx.addr = security_descriptor + this->offsets[_SECURITY_DESCRIPTOR_Control];
         if ( VMI_SUCCESS == vmi_read_16(vmi, &ctx, &se_ctrl) )
-            security_flags = parse_flags(se_ctrl, security_controls, this->m_output_format, "SecurityControl=0");
+            security_flags = slog::flags(se_ctrl, security_controls);
 
         // Get owner SID
         addr_t powner = 0;
@@ -271,7 +286,7 @@ std::tuple<bool, win_objattrs_t> win_filetracer::objattr_read(drakvuf_t drakvuf,
         if ( VMI_SUCCESS == vmi_read_addr(vmi, &ctx, &pdacl) && pdacl)
         {
             ctx.addr = pdacl;
-            dacl = read_acl(vmi, &ctx, this->offsets.data(), "Dacl", this->m_output_format);
+            dacl = read_acl(vmi, &ctx, this->offsets.data());
         }
 
         // Get SACL
@@ -280,7 +295,7 @@ std::tuple<bool, win_objattrs_t> win_filetracer::objattr_read(drakvuf_t drakvuf,
         if ( VMI_SUCCESS == vmi_read_addr(vmi, &ctx, &psacl) && psacl)
         {
             ctx.addr = psacl;
-            sacl = read_acl(vmi, &ctx, this->offsets.data(), "Sacl", this->m_output_format);
+            sacl = read_acl(vmi, &ctx, this->offsets.data());
         }
     }
 
@@ -289,7 +304,7 @@ std::tuple<bool, win_objattrs_t> win_filetracer::objattr_read(drakvuf_t drakvuf,
     if ( VMI_SUCCESS != vmi_read_32(vmi, &ctx, &obj_attr) )
         return {};
 
-    auto file_attr = parse_flags(obj_attr, object_attrs, this->m_output_format, "Attributes=0");
+    auto file_attr = slog::flags(obj_attr, object_attrs);
 
     win_objattrs_t ret{file_path, file_attr, security_flags, owner, group, sacl, dacl};
     g_free(file_path);
@@ -334,7 +349,7 @@ std::tuple<bool, file_basic_information_t> win_filetracer::basic_file_info_read(
     if ( VMI_FAILURE == vmi_read_32(vmi, &ctx, &file_attributes) )
         return {};
 
-    auto str_file_attr = parse_flags(file_attributes, file_flags_and_attrs, this->m_output_format, "FileAttributes=0");
+    auto str_file_attr = slog::flags(file_attributes, file_flags_and_attrs);
 
     file_basic_information_t ret{windows_tick_to_unix(creation_time), windows_tick_to_unix(last_access_time), windows_tick_to_unix(last_write_time), windows_tick_to_unix(change_time), str_file_attr};
 
@@ -362,7 +377,7 @@ std::tuple<bool, file_disposition_information_ex_t> win_filetracer::file_disposi
         PRINT_DEBUG("[FILETRACER] failed to read FILE_DISPOSITION_INFORMATION_EX\n");
         return {};
     }
-    auto str_disposition_flags = parse_flags(flags, file_disposition_flags, this->m_output_format, "flags=0");
+    auto str_disposition_flags = slog::flags(flags, file_disposition_flags);
     file_disposition_information_ex_t ret {str_disposition_flags};
 
     return std::make_tuple(true, std::move(ret));
@@ -415,7 +430,7 @@ std::tuple<bool, file_network_open_information_t> win_filetracer::net_file_info_
     if ( VMI_FAILURE == vmi_read_32(vmi, &ctx, &file_attributes) )
         return {};
 
-    auto str_file_attr = parse_flags(file_attributes, file_flags_and_attrs, this->m_output_format, "FileAttributes=0");
+    auto str_file_attr = slog::flags(file_attributes, file_flags_and_attrs);
 
     file_network_open_information_t ret{windows_tick_to_unix(creation_time), windows_tick_to_unix(last_access_time), windows_tick_to_unix(last_write_time), windows_tick_to_unix(change_time), allocation_size, end_of_file, str_file_attr};
 
@@ -428,9 +443,9 @@ void win_filetracer::print_file_read_info(drakvuf_t drakvuf, drakvuf_trap_info_t
     if ( !file )
         return;
 
-    fmt::print(this->m_output_format, "filetracer", drakvuf, info,
-        keyval("FileName", fmt::Qstr(file)),
-        keyval("FileHandle", fmt::Xval(handle))
+    slog::emit("filetracer", drakvuf, info,
+        slog::attr("FileName", slog::text(file)),
+        slog::attr("FileHandle", slog::hex(handle))
     );
 
     g_free(file);
@@ -461,10 +476,10 @@ void win_filetracer::print_delete_file_info(drakvuf_t drakvuf, drakvuf_trap_info
     if ( !file )
         return;
 
-    fmt::print(this->m_output_format, "filetracer", drakvuf, info,
-        keyval("Operation", fmt::Rstr(operation_name)),
-        keyval("FileName", fmt::Qstr(file)),
-        keyval("FileHandle", fmt::Xval(handle))
+    slog::emit("filetracer", drakvuf, info,
+        slog::attr("Operation", slog::text(operation_name)),
+        slog::attr("FileName", slog::text(file)),
+        slog::attr("FileHandle", slog::hex(handle))
     );
 
     g_free(file);
@@ -477,11 +492,11 @@ void win_filetracer::print_delete_file_info_ex(drakvuf_t drakvuf, drakvuf_trap_i
     if ( !file )
         return;
 
-    fmt::print(this->m_output_format, "filetracer", drakvuf, info,
-        keyval("Operation", fmt::Rstr(operation_name)),
-        keyval("FileName", fmt::Qstr(file)),
-        keyval("FileHandle", fmt::Xval(handle)),
-        flagsval("Flags", fileinfo.flags)
+    slog::emit("filetracer", drakvuf, info,
+        slog::attr("Operation", slog::text(operation_name)),
+        slog::attr("FileName", slog::text(file)),
+        slog::attr("FileHandle", slog::hex(handle)),
+        slog::attr("Flags", fileinfo.flags)
     );
 
     g_free(file);
@@ -490,64 +505,64 @@ void win_filetracer::print_delete_file_info_ex(drakvuf_t drakvuf, drakvuf_trap_i
 void win_filetracer::print_basic_file_info(drakvuf_t drakvuf, drakvuf_trap_info_t* info, uint32_t src_file_handle, const file_basic_information_t& basic_file_info, uint64_t status)
 {
     const char* operation_name = "FileBasicInformation";
-    char* filename_ = drakvuf_get_filename_from_handle(drakvuf, info, src_file_handle);
-    const char* filename = filename_ ? : "<UNKNOWN>";
+    char* filename = drakvuf_get_filename_from_handle(drakvuf, info, src_file_handle);
     if (!status)
     {
-        fmt::print(this->m_output_format, "filetracer", drakvuf, info,
-            keyval("Operation", fmt::Rstr(operation_name)),
-            keyval("FileHandle", fmt::Xval(src_file_handle)),
-            keyval("FileName", fmt::Qstr(filename)),
-            keyval("CreationTime", fmt::Nval(basic_file_info.creation_time)),
-            keyval("LastAccessTime", fmt::Nval(basic_file_info.last_access_time)),
-            keyval("LastWriteTime", fmt::Nval(basic_file_info.last_write_time)),
-            keyval("ChangeTime", fmt::Nval(basic_file_info.change_time)),
-            flagsval("FileAttributes", basic_file_info.file_attributes)
+        slog::emit("filetracer", drakvuf, info,
+            slog::attr("Operation", slog::text(operation_name)),
+            slog::attr("FileHandle", slog::hex(src_file_handle)),
+            slog::attr("FileName", slog::text(filename)),
+            slog::attr("CreationTime", slog::number(basic_file_info.creation_time)),
+            slog::attr("LastAccessTime", slog::number(basic_file_info.last_access_time)),
+            slog::attr("LastWriteTime", slog::number(basic_file_info.last_write_time)),
+            slog::attr("ChangeTime", slog::number(basic_file_info.change_time)),
+            slog::attr("FileAttributes", basic_file_info.file_attributes)
         );
     }
     else
     {
-        fmt::print(this->m_output_format, "filetracer", drakvuf, info,
-            keyval("Operation", fmt::Rstr(operation_name)),
-            keyval("FileHandle", fmt::Xval(src_file_handle)),
-            keyval("FileName", fmt::Qstr(filename)),
-            keyval("Status", fmt::Xval(status))
+        slog::emit("filetracer", drakvuf, info,
+            slog::attr("Operation", slog::text(operation_name)),
+            slog::attr("FileHandle", slog::hex(src_file_handle)),
+            slog::attr("FileName", slog::text(filename)),
+            slog::attr("Status", slog::hex(status))
         );
     }
 
-    g_free(filename_);
+    g_free(filename);
 }
 
 void win_filetracer::print_file_net_info(drakvuf_t drakvuf, drakvuf_trap_info_t* info, uint32_t src_file_handle, const file_network_open_information_t& file_info, uint64_t status)
 {
     const char* operation_name = "FileNetworkInformation";
-    char* filename_ = drakvuf_get_filename_from_handle(drakvuf, info, src_file_handle);
-    const char* filename = filename_ ? : "<UNKNOWN>";
+    char* filename = drakvuf_get_filename_from_handle(drakvuf, info, src_file_handle);
 
     if (!status)
     {
-        fmt::print(this->m_output_format, "filetracer", drakvuf, info,
-            keyval("Operation", fmt::Rstr(operation_name)),
-            keyval("FileHandle", fmt::Xval(src_file_handle)),
-            keyval("FileName", fmt::Qstr(filename)),
-            keyval("CreationTime", fmt::Nval(file_info.creation_time)),
-            keyval("LastAccessTime", fmt::Nval(file_info.last_access_time)),
-            keyval("LastWriteTime", fmt::Nval(file_info.last_write_time)),
-            keyval("ChangeTime", fmt::Nval(file_info.change_time)),
-            keyval("AllocationSize", fmt::Xval(file_info.allocation_size)),
-            keyval("EndOfFile", fmt::Xval(file_info.end_of_file)),
-            flagsval("FileAttributes", file_info.file_attributes)
+        slog::emit("filetracer", drakvuf, info,
+            slog::attr("Operation", slog::text(operation_name)),
+            slog::attr("FileHandle", slog::hex(src_file_handle)),
+            slog::attr("FileName", slog::text(filename)),
+            slog::attr("CreationTime", slog::number(file_info.creation_time)),
+            slog::attr("LastAccessTime", slog::number(file_info.last_access_time)),
+            slog::attr("LastWriteTime", slog::number(file_info.last_write_time)),
+            slog::attr("ChangeTime", slog::number(file_info.change_time)),
+            slog::attr("AllocationSize", slog::hex(file_info.allocation_size)),
+            slog::attr("EndOfFile", slog::hex(file_info.end_of_file)),
+            slog::attr("FileAttributes", file_info.file_attributes)
         );
     }
     else
     {
-        fmt::print(this->m_output_format, "filetracer", drakvuf, info,
-            keyval("Operation", fmt::Rstr(operation_name)),
-            keyval("FileHandle", fmt::Xval(src_file_handle)),
-            keyval("FileName", fmt::Qstr(filename)),
-            keyval("Status", fmt::Xval(status))
+        slog::emit("filetracer", drakvuf, info,
+            slog::attr("Operation", slog::text(operation_name)),
+            slog::attr("FileHandle", slog::hex(src_file_handle)),
+            slog::attr("FileName", slog::text(filename)),
+            slog::attr("Status", slog::hex(status))
         );
     }
+
+    g_free(filename);
 }
 
 void win_filetracer::print_file_query_attributes(drakvuf_t drakvuf, drakvuf_trap_info_t* info, const win_objattrs_t& attrs, const file_basic_information_t& file_info, uint64_t status)
@@ -556,24 +571,24 @@ void win_filetracer::print_file_query_attributes(drakvuf_t drakvuf, drakvuf_trap
 
     if (!status)
     {
-        fmt::print(this->m_output_format, "filetracer", drakvuf, info,
-            keyval("FileName", fmt::Estr(attrs.file_path)),
-            flagsval("ObjectAttributes", attrs.obj_attrs),
-            keyval("SecurityDescriptor", security_descriptor),
-            keyval("CreationTime", fmt::Nval(file_info.creation_time)),
-            keyval("LastAccessTime", fmt::Nval(file_info.last_access_time)),
-            keyval("LastWriteTime", fmt::Nval(file_info.last_write_time)),
-            keyval("ChangeTime", fmt::Nval(file_info.change_time)),
-            flagsval("FileAttributes", file_info.file_attributes)
+        slog::emit("filetracer", drakvuf, info,
+            slog::attr("FileName", slog::text(attrs.file_path)),
+            slog::attr("ObjectAttributes", attrs.obj_attrs),
+            slog::attr("SecurityDescriptor", security_descriptor),
+            slog::attr("CreationTime", slog::number(file_info.creation_time)),
+            slog::attr("LastAccessTime", slog::number(file_info.last_access_time)),
+            slog::attr("LastWriteTime", slog::number(file_info.last_write_time)),
+            slog::attr("ChangeTime", slog::number(file_info.change_time)),
+            slog::attr("FileAttributes", file_info.file_attributes)
         );
     }
     else
     {
-        fmt::print(this->m_output_format, "filetracer", drakvuf, info,
-            keyval("FileName", fmt::Estr(attrs.file_path)),
-            flagsval("ObjectAttributes", attrs.obj_attrs),
-            keyval("SecurityDescriptor", security_descriptor),
-            keyval("Status", fmt::Xval(status))
+        slog::emit("filetracer", drakvuf, info,
+            slog::attr("FileName", slog::text(attrs.file_path)),
+            slog::attr("ObjectAttributes", attrs.obj_attrs),
+            slog::attr("SecurityDescriptor", security_descriptor),
+            slog::attr("Status", slog::hex(status))
         );
     }
 }
@@ -584,26 +599,26 @@ void win_filetracer::print_file_query_full_attributes(drakvuf_t drakvuf, drakvuf
 
     if (!status)
     {
-        fmt::print(this->m_output_format, "filetracer", drakvuf, info,
-            keyval("FileName", fmt::Estr(attrs.file_path)),
-            flagsval("ObjectAttributes", attrs.obj_attrs),
-            keyval("SecurityDescriptor", security_descriptor),
-            keyval("CreationTime", fmt::Nval(file_info.creation_time)),
-            keyval("LastAccessTime", fmt::Nval(file_info.last_access_time)),
-            keyval("LastWriteTime", fmt::Nval(file_info.last_write_time)),
-            keyval("ChangeTime", fmt::Nval(file_info.change_time)),
-            keyval("AllocationSize", fmt::Xval(file_info.allocation_size)),
-            keyval("EndOfFile", fmt::Xval(file_info.end_of_file)),
-            flagsval("FileAttributes", file_info.file_attributes)
+        slog::emit("filetracer", drakvuf, info,
+            slog::attr("FileName", slog::text(attrs.file_path)),
+            slog::attr("ObjectAttributes", attrs.obj_attrs),
+            slog::attr("SecurityDescriptor", security_descriptor),
+            slog::attr("CreationTime", slog::number(file_info.creation_time)),
+            slog::attr("LastAccessTime", slog::number(file_info.last_access_time)),
+            slog::attr("LastWriteTime", slog::number(file_info.last_write_time)),
+            slog::attr("ChangeTime", slog::number(file_info.change_time)),
+            slog::attr("AllocationSize", slog::hex(file_info.allocation_size)),
+            slog::attr("EndOfFile", slog::hex(file_info.end_of_file)),
+            slog::attr("FileAttributes", file_info.file_attributes)
         );
     }
     else
     {
-        fmt::print(this->m_output_format, "filetracer", drakvuf, info,
-            keyval("FileName", fmt::Estr(attrs.file_path)),
-            flagsval("ObjectAttributes", attrs.obj_attrs),
-            keyval("SecurityDescriptor", security_descriptor),
-            keyval("Status", fmt::Xval(status))
+        slog::emit("filetracer", drakvuf, info,
+            slog::attr("FileName", slog::text(attrs.file_path)),
+            slog::attr("ObjectAttributes", attrs.obj_attrs),
+            slog::attr("SecurityDescriptor", security_descriptor),
+            slog::attr("Status", slog::hex(status))
         );
     }
 }
@@ -662,11 +677,11 @@ void win_filetracer::print_rename_file_info(vmi_instance_t vmi, drakvuf_t drakvu
     }
     vmi_free_unicode_str(dst_file_name_us);
 
-    fmt::print(this->m_output_format, "filetracer", drakvuf, info,
-        keyval("Operation", fmt::Rstr(operation_name)),
-        keyval("FileSrc", fmt::Qstr(src_file)),
-        keyval("FileDst", fmt::Qstr(dst_file_p)),
-        keyval("FileHandle", fmt::Xval(src_file_handle))
+    slog::emit("filetracer", drakvuf, info,
+        slog::attr("Operation", slog::text(operation_name)),
+        slog::attr("FileSrc", slog::text(src_file)),
+        slog::attr("FileDst", slog::text(dst_file_p)),
+        slog::attr("FileHandle", slog::hex(src_file_handle))
     );
 
     g_free(dst_file_p);
@@ -686,17 +701,16 @@ void win_filetracer::print_eof_file_info(vmi_instance_t vmi, drakvuf_t drakvuf, 
     if ( VMI_FAILURE == vmi_read_64(vmi, &ctx, &file_size))
         return;
 
-    char* filename_ = drakvuf_get_filename_from_handle(drakvuf, info, src_file_handle);
-    const char* filename = filename_ ? : "<UNKNOWN>";
+    char* filename = drakvuf_get_filename_from_handle(drakvuf, info, src_file_handle);
 
-    fmt::print(this->m_output_format, "filetracer", drakvuf, info,
-        keyval("Operation", fmt::Rstr(operation_name)),
-        keyval("FileHandle", fmt::Xval(src_file_handle)),
-        keyval("FileName", fmt::Qstr(filename)),
-        keyval("FileSize", fmt::Nval(file_size))
+    slog::emit("filetracer", drakvuf, info,
+        slog::attr("Operation", slog::text(operation_name)),
+        slog::attr("FileHandle", slog::hex(src_file_handle)),
+        slog::attr("FileName", slog::text(filename)),
+        slog::attr("FileSize", slog::number(file_size))
     );
 
-    g_free(filename_);
+    g_free(filename);
 }
 
 event_response_t win_filetracer::create_file_ret_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
@@ -1185,8 +1199,8 @@ event_response_t win_filetracer::query_information_file_cb(drakvuf_t drakvuf, dr
 
 /* ----------------------------------------------------- */
 
-win_filetracer::win_filetracer(drakvuf_t drakvuf, const filetracer_config* c, output_format_t output)
-    : pluginex(drakvuf, output)
+win_filetracer::win_filetracer(drakvuf_t drakvuf, const filetracer_config* c)
+    : pluginex(drakvuf)
 {
     if ( !drakvuf_get_kernel_struct_members_array_rva(drakvuf, offset_names, this->offsets.size(), this->offsets.data()) )
         throw -1;

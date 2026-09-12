@@ -106,7 +106,8 @@
 #define PRIVILEGE_H
 
 #include <inttypes.h>
-#include <string>
+
+#include "slog/slog.hpp"
 
 enum privilege_attributes
 {
@@ -167,6 +168,6 @@ struct TOKEN_PRIVILEGES
     struct LUID_AND_ATTRIBUTES privileges[];
 } __attribute__((packed));
 
-std::pair<std::string, fmt::Aarg> stringify_privilege(struct LUID_AND_ATTRIBUTES& privilege);
+slog::keyval stringify_privilege(struct LUID_AND_ATTRIBUTES& privilege);
 
 #endif

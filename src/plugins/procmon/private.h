@@ -134,7 +134,7 @@ struct execve_data : PluginResult
 
     addr_t bprm;
     std::string process_name;
-    std::string thread_name;
+    std::optional<std::string> thread_name;
     std::string image_path_name;
     std::string command_line;
     std::map<std::string, std::string> envp;
@@ -160,9 +160,9 @@ struct send_signal_data : PluginResult
     uint32_t target_proc_tid;
     vmi_pid_t target_proc_ppid;
 
-    std::string target_process_name;
-    std::string thread_name;
-    std::string target_thread_name;
+    std::optional<std::string> target_process_name;
+    std::optional<std::string> thread_name;
+    std::optional<std::string> target_thread_name;
 
     uint64_t signal;
 };

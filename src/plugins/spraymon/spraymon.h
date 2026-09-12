@@ -118,8 +118,7 @@ struct spraymon_config
 class spraymon : public pluginex
 {
 public:
-    const output_format_t format;
-    spraymon(drakvuf_t drakvuf, const spraymon_config* config, output_format_t output);
+    spraymon(drakvuf_t drakvuf, const spraymon_config* config);
     bool stop_impl() override;
 
 private:

@@ -856,18 +856,6 @@ int drakvuf_event_fd_add(drakvuf_t drakvuf,
 int drakvuf_event_fd_remove(drakvuf_t drakvuf,
     int fd) NOEXCEPT;
 
-/*---------------------------------------------------------
- * Output helpers
- */
-
-typedef enum
-{
-    OUTPUT_DEFAULT,
-    OUTPUT_CSV,
-    OUTPUT_KV,
-    OUTPUT_JSON,
-} output_format_t;
-
 #pragma GCC visibility pop
 
 #ifdef __cplusplus

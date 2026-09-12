@@ -119,7 +119,7 @@ using namespace fileextractor_ns;
 class win_fileextractor: public pluginex
 {
 public:
-    win_fileextractor(drakvuf_t drakvuf, const fileextractor_config* config, output_format_t output);
+    win_fileextractor(drakvuf_t drakvuf, const fileextractor_config* config);
     win_fileextractor(const win_fileextractor&) = delete;
     win_fileextractor& operator=(const win_fileextractor&) = delete;
     ~win_fileextractor() = default;
@@ -154,7 +154,6 @@ private:
     uint64_t hash_size{0};
     uint64_t extract_size{0};
     const exclude_matcher exclude;
-    output_format_t format;
 
     int sequence_number = 0;
 
@@ -225,7 +224,7 @@ private:
         vmi_instance_t,
         handle_t,
         uint64_t* flags);
-    std::string get_file_name(vmi_instance_t,
+    unicode_string get_file_name(vmi_instance_t,
         drakvuf_trap_info_t*,
         addr_t handle,
         addr_t* out_file,
@@ -256,8 +255,9 @@ private:
 
     void print_file_information(drakvuf_trap_info_t*, task_t&);
     void print_plugin_close_information(drakvuf_trap_info_t*, task_t&);
-    void print_extraction_failure(drakvuf_trap_info_t* info, const std::string& filename, const std::string& message);
-    void print_extraction_exclusion(drakvuf_trap_info_t* info, const std::string& filename);
+    void print_extraction_failure(drakvuf_trap_info_t* info, const unicode_string& filename,
+        const std::string& message, slog::keyval_array extra = {});
+    void print_extraction_exclusion(drakvuf_trap_info_t* info, const unicode_string& filename);
 
     task_t* close_cb_get_task(drakvuf_trap_info_t*);
     task_t* setinformation_cb_get_task(drakvuf_trap_info_t*);

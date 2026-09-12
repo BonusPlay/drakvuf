@@ -118,7 +118,6 @@ class socketmon: public plugin
 {
 public:
     page_mode_t pm;
-    output_format_t format;
     win_build_info_t build;
     drakvuf_t drakvuf;
     wanted_hooks_t wanted_hooks;
@@ -150,7 +149,7 @@ public:
         }
     };
 
-    socketmon(drakvuf_t drakvuf, const socketmon_config* config, output_format_t output);
+    socketmon(drakvuf_t drakvuf, const socketmon_config* config);
     ~socketmon();
     virtual bool stop_impl() override;
 };

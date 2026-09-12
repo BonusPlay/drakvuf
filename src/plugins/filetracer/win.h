@@ -175,7 +175,7 @@ public:
     void print_rename_file_info(vmi_instance_t vmi, drakvuf_t drakvuf, drakvuf_trap_info_t* info, uint32_t src_file_handle, addr_t fileinfo);
     void print_eof_file_info(vmi_instance_t vmi, drakvuf_t drakvuf, drakvuf_trap_info_t* info, uint32_t src_file_handle, addr_t fileinfo);
 
-    win_filetracer(drakvuf_t drakvuf, const filetracer_config* config, output_format_t output);
+    win_filetracer(drakvuf_t drakvuf, const filetracer_config* config);
     win_filetracer(const win_filetracer&) = delete;
     win_filetracer& operator=(const win_filetracer&) = delete;
 };

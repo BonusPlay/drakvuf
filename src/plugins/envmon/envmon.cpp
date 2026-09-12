@@ -107,7 +107,9 @@
 #include <stdexcept>
 #include <map>
 
-#include <plugins/output_format.h>
+#include <slog/slog.hpp>
+
+#include "plugins/plugin_utils.h"
 
 #include "envmon.h"
 #include "private.h"
@@ -188,8 +190,6 @@ static const std::map<uint64_t, std::string> define_dos_device_flags
 
 static event_response_t trap_SspipGetUserName_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
 {
-    auto p = get_trap_plugin<envmon>(info);
-
     addr_t ex_name_fmt = drakvuf_get_function_argument(drakvuf, info, 1);
 
     const char* ex_name_fmt_str = "<UNKNOWN>";
@@ -197,18 +197,16 @@ static event_response_t trap_SspipGetUserName_cb(drakvuf_t drakvuf, drakvuf_trap
         ex_name_fmt_str = extended_name_formats[ex_name_fmt];
 
 
-    fmt::print(p->m_output_format, "envmon", drakvuf, info,
-        keyval("ExtendedNameFormat", fmt::Nval(ex_name_fmt)),
-        keyval("ExtendedNameFormatStr", fmt::Qstr(ex_name_fmt_str))
+    slog::emit("envmon", drakvuf, info,
+        slog::attr("ExtendedNameFormat", slog::number(ex_name_fmt)),
+        slog::attr("ExtendedNameFormatStr", slog::text(ex_name_fmt_str))
     );
     return VMI_EVENT_RESPONSE_NONE;
 }
 
 static event_response_t trap_DefineDosDeviceW_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
 {
-    auto p = get_trap_plugin<envmon>(info);
-
-    const auto flags = print::FieldToString(define_dos_device_flags, std::bitset<64>(drakvuf_get_function_argument(drakvuf, info, 1)));
+    const auto flags = slog::flags(drakvuf_get_function_argument(drakvuf, info, 1), define_dos_device_flags);
     addr_t device_name_va = drakvuf_get_function_argument(drakvuf, info, 2);
     addr_t target_path_va = drakvuf_get_function_argument(drakvuf, info, 3);
 
@@ -221,20 +219,16 @@ static event_response_t trap_DefineDosDeviceW_cb(drakvuf_t drakvuf, drakvuf_trap
     vmi_lock_guard wmi_lock(drakvuf);
 
     auto device_name_us = drakvuf_read_wchar_string(drakvuf, &ctx);
-    const char* device_name = device_name_us ?
-        reinterpret_cast<char*>(device_name_us->contents) :
-        "<UNKNOWN>";
+    const auto device_name = slog::value(device_name_us);
 
     ctx.addr = target_path_va;
     auto target_path_us = drakvuf_read_wchar_string(drakvuf, &ctx);
-    const char* target_path = target_path_us ?
-        reinterpret_cast<char*>(target_path_us->contents) :
-        "<UNKNOWN>";
+    const auto target_path = slog::value(target_path_us);
 
-    fmt::print(p->m_output_format, "envmon", drakvuf, info,
-        keyval("Flags", fmt::Qstr(flags)),
-        keyval("DeviceName", fmt::Qstr(device_name)),
-        keyval("TargetPath", fmt::Qstr(target_path))
+    slog::emit("envmon", drakvuf, info,
+        slog::attr("Flags", flags),
+        slog::attr("DeviceName", device_name),
+        slog::attr("TargetPath", target_path)
     );
 
     vmi_free_unicode_str(device_name_us);
@@ -245,24 +239,18 @@ static event_response_t trap_DefineDosDeviceW_cb(drakvuf_t drakvuf, drakvuf_trap
 
 static event_response_t trap_GetComputerNameW_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
 {
-    auto p = get_trap_plugin<envmon>(info);
-
-    fmt::print(p->m_output_format, "envmon", drakvuf, info);
+    slog::emit("envmon", drakvuf, info);
     return VMI_EVENT_RESPONSE_NONE;
 }
 
 static event_response_t trap_IsNativeVhdBoot_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
 {
-    auto p = get_trap_plugin<envmon>(info);
-
-    fmt::print(p->m_output_format, "envmon", drakvuf, info);
+    slog::emit("envmon", drakvuf, info);
     return VMI_EVENT_RESPONSE_NONE;
 }
 
 static event_response_t trap_GetComputerNameExW_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
 {
-    auto p = get_trap_plugin<envmon>(info);
-
     // COMPUTER_NAME_FORMAT NameType
     addr_t name_type = drakvuf_get_function_argument(drakvuf, info, 1);
 
@@ -270,23 +258,21 @@ static event_response_t trap_GetComputerNameExW_cb(drakvuf_t drakvuf, drakvuf_tr
     if (name_type < ComputerNameMax)
         name_type_str = computer_name_formats[name_type];
 
-    fmt::print(p->m_output_format, "envmon", drakvuf, info,
-        keyval("NameType", fmt::Nval(name_type)),
-        keyval("NameTypeStr", fmt::Qstr(name_type_str))
+    slog::emit("envmon", drakvuf, info,
+        slog::attr("NameType", slog::number(name_type)),
+        slog::attr("NameTypeStr", slog::text(name_type_str))
     );
     return VMI_EVENT_RESPONSE_NONE;
 }
 
 static event_response_t trap_GetAdaptersAddresses_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
 {
-    auto p = get_trap_plugin<envmon>(info);
-
     const auto family = print::FieldToString(family_name_formats, drakvuf_get_function_argument(drakvuf, info, 1));
-    const auto flags  = print::FieldToString(flags_name_formats, std::bitset<64>(drakvuf_get_function_argument(drakvuf, info, 2)));
+    const auto flags  = slog::flags(drakvuf_get_function_argument(drakvuf, info, 2), flags_name_formats);
 
-    fmt::print(p->m_output_format, "envmon", drakvuf, info,
-        keyval("Family", fmt::Qstr(family)),
-        flagsval("Flags", std::move(flags))
+    slog::emit("envmon", drakvuf, info,
+        slog::attr("Family", slog::text(family)),
+        slog::attr("Flags", flags)
     );
 
     return VMI_EVENT_RESPONSE_NONE;
@@ -294,11 +280,9 @@ static event_response_t trap_GetAdaptersAddresses_cb(drakvuf_t drakvuf, drakvuf_
 
 static event_response_t trap_WNetGetProviderNameW_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
 {
-    auto p = get_trap_plugin<envmon>(info);
-
     const auto net_type = drakvuf_get_function_argument(drakvuf, info, 1);
-    fmt::print(p->m_output_format, "envmon", drakvuf, info,
-        keyval("NetType", fmt::Nval(net_type))
+    slog::emit("envmon", drakvuf, info,
+        slog::attr("NetType", slog::number(net_type))
     );
     return VMI_EVENT_RESPONSE_NONE;
 }
@@ -329,8 +313,8 @@ static arch_t get_arch(drakvuf_t drakvuf)
     }
 }
 
-envmon::envmon(drakvuf_t drakvuf, const envmon_config* c, output_format_t output)
-    : pluginex(drakvuf, output)
+envmon::envmon(drakvuf_t drakvuf, const envmon_config* c)
+    : pluginex(drakvuf)
 {
     auto winver = get_win_ver(drakvuf);
     if (!c->sspicli_profile)

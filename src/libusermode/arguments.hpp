@@ -102,226 +102,43 @@
  *                                                                         *
  ***************************************************************************/
 
-#include "printers.hpp"
-#include "utils.hpp"
-#include <array>
+#ifndef LIBUSERMODE_ARGUMENTS_HPP
+#define LIBUSERMODE_ARGUMENTS_HPP
+
+#include <cstdint>
 #include <string>
-#include <sstream>
-#include <iomanip>
-#include <libvmi/libvmi.h>
-#include <libdrakvuf/libdrakvuf.h>
-#include "plugins/plugins.h"
+#include <slog/slog.hpp>
 
-ArgumentPrinter::ArgumentPrinter(std::string arg_name, PrinterConfig config) :
-    config(config), name(arg_name)
+enum class argument_kind
 {
-    // intentionally empty
-}
+    number,
+    c_string,
+    wide_string,
+    unicode_string,
+    uint32_pointer,
+    uint64_pointer,
+    pointer_pointer,
+    guid,
+    bytes16,
+};
 
-std::string ArgumentPrinter::get_name() const
+struct argument_options
 {
-    return name;
-}
+    enum class number_format { hex, decimal };
 
-std::string ArgumentPrinter::print(drakvuf_t drakvuf, drakvuf_trap_info* info, uint64_t argument) const
+    bool omit_address = false;
+    number_format format = number_format::hex;
+};
+
+struct argument_spec
 {
-    std::stringstream stream;
-    stream << name << "=";
-    if (config.numeric_format == PrinterConfig::NumericFormat::HEX)
-        stream << "0x" << std::hex;
-    stream << argument;
-    return stream.str();
-}
+    std::string name;
+    argument_kind kind = argument_kind::number;
+    argument_options options{};
+};
 
-ArgumentPrinter::~ArgumentPrinter() {}
+// Decode according to the declared guest argument type; slog owns serialization.
+slog::value decode_argument(drakvuf_t drakvuf, drakvuf_trap_info_t* info,
+    uint64_t raw, const argument_spec& spec);
 
-std::string StringPrinterInterface::print(drakvuf_t drakvuf, drakvuf_trap_info* info, uint64_t argument) const
-{
-    ACCESS_CONTEXT(ctx,
-        .translate_mechanism = VMI_TM_PROCESS_DTB,
-        .dtb = info->regs->cr3,
-        .addr = argument
-    );
-    std::string str = getBuffer(drakvuf, &ctx);
-    std::stringstream stream;
-    stream << name << "=";
-    if (!config.print_no_addr)
-        stream << "0x" << std::hex << argument << ":";
-    stream << "\"" << escape_str(str) << "\"";
-    return stream.str();
-}
-
-std::string AsciiPrinter::getBuffer(drakvuf_t drakvuf, const access_context_t* ctx) const
-{
-    auto vmi = vmi_lock_guard(drakvuf);
-    char* str = vmi_read_str(vmi, ctx);
-    std::string ret = str ? str : "";
-    g_free(str);
-    return ret;
-}
-
-std::string WideStringPrinter::getBuffer(drakvuf_t drakvuf, const access_context_t* ctx) const
-{
-    auto vmi = vmi_lock_guard(drakvuf);
-    auto str_obj = drakvuf_read_wchar_string(drakvuf, ctx);
-    std::string ret = str_obj == NULL ? "" : (char*)str_obj->contents;
-    if (str_obj)
-        vmi_free_unicode_str(str_obj);
-    return ret;
-}
-
-std::string Binary16StringPrinter::print(drakvuf_t drakvuf, drakvuf_trap_info* info, uint64_t argument) const
-{
-    auto vmi = vmi_lock_guard(drakvuf);
-    ACCESS_CONTEXT(ctx,
-        .translate_mechanism = VMI_TM_PROCESS_DTB,
-        .dtb = info->regs->cr3,
-        .addr = argument
-    );
-    std::stringstream stream;
-    stream << name << "=";
-    if (!config.print_no_addr)
-        stream << "0x" << std::hex << argument << ":";
-    stream << "\"";
-    const size_t BUF_SIZE = 16;
-    std::array<uint8_t, BUF_SIZE> buffer;
-    if (VMI_SUCCESS == vmi_read(vmi, &ctx, 16, buffer.data(), nullptr))
-    {
-        for (auto i: buffer)
-            stream << std::setw(2) << std::setfill('0') << (int)i;
-    }
-    stream << "\"";
-    return stream.str();
-}
-
-std::string UnicodePrinter::print(drakvuf_t drakvuf, drakvuf_trap_info* info, uint64_t argument) const
-{
-    bool is32bit = drakvuf_process_is32bit(drakvuf, info);
-
-    unicode_string_t* str_us = is32bit ? drakvuf_read_unicode32(drakvuf, info, argument)
-        : drakvuf_read_unicode(drakvuf, info, argument);
-
-    std::string str = str_us ? (char*)str_us->contents : "";
-    if (str_us)
-        vmi_free_unicode_str(str_us);
-
-    std::stringstream stream;
-    stream << name << "=";
-    if (!config.print_no_addr)
-        stream << "0x" << std::hex << argument << ":";
-    stream << "\"" << escape_str(str) << "\"";
-    return stream.str();
-}
-
-std::string UlongPrinter::print(drakvuf_t drakvuf, drakvuf_trap_info* info, uint64_t argument) const
-{
-    ACCESS_CONTEXT(ctx,
-        .translate_mechanism = VMI_TM_PROCESS_DTB,
-        .dtb = info->regs->cr3,
-        .addr = argument
-    );
-    auto vmi = vmi_lock_guard(drakvuf);
-    uint32_t value;
-    if (vmi_read_32(vmi, &ctx, &value) != VMI_SUCCESS)
-        value = 0;
-    return ArgumentPrinter::print(drakvuf, info, value);
-}
-
-std::string UlongLongPrinter::print(drakvuf_t drakvuf, drakvuf_trap_info* info, uint64_t argument) const
-{
-    ACCESS_CONTEXT(ctx,
-        .translate_mechanism = VMI_TM_PROCESS_DTB,
-        .dtb = info->regs->cr3,
-        .addr = argument
-    );
-    auto vmi = vmi_lock_guard(drakvuf);
-    uint64_t value;
-    if (vmi_read_64(vmi, &ctx, &value) != VMI_SUCCESS)
-        value = 0;
-    return ArgumentPrinter::print(drakvuf, info, value);
-}
-
-std::string PointerToPointerPrinter::print(drakvuf_t drakvuf, drakvuf_trap_info* info, uint64_t argument) const
-{
-    ACCESS_CONTEXT(ctx,
-        .translate_mechanism = VMI_TM_PROCESS_DTB,
-        .dtb = info->regs->cr3,
-        .addr = argument
-    );
-
-    addr_t value = 0;
-    int ret = drakvuf_read_addr(drakvuf, info, &ctx, &value);
-    if (ret != VMI_SUCCESS)
-        value = 0;
-
-    return ArgumentPrinter::print(drakvuf, info, value);
-}
-
-std::string GuidPrinter::print(drakvuf_t drakvuf, drakvuf_trap_info* info, uint64_t argument) const
-{
-    ACCESS_CONTEXT(ctx,
-        .translate_mechanism = VMI_TM_PROCESS_DTB,
-        .dtb = info->regs->cr3,
-        .addr = argument
-    );
-
-    struct
-    {
-        uint32_t Data1;
-        uint16_t Data2;
-        uint16_t Data3;
-        uint8_t Data4[8];
-    } __attribute__((packed, aligned(4))) guid;
-
-    auto vmi = vmi_lock_guard(drakvuf);
-    if (vmi_read(vmi, &ctx, sizeof(guid), &guid, nullptr) != VMI_SUCCESS)
-        memset(&guid, 0, sizeof(guid));
-
-    const int sz = 64;
-    char stream[sz] = {0};
-    snprintf(stream, sz, "\"%08X-%04hX-%04hX-%02hhX%02hhX-%02hhX%02hhX%02hhX%02hhX%02hhX%02hhX\"",
-        guid.Data1, guid.Data2, guid.Data3, guid.Data4[0], guid.Data4[1],
-        guid.Data4[2], guid.Data4[3], guid.Data4[4],
-        guid.Data4[5], guid.Data4[6], guid.Data4[7]);
-    return name + "=" + std::string(stream);
-}
-
-BitMaskPrinter::BitMaskPrinter(
-    std::string arg_name,
-    std::map < uint64_t, std::string > dict,
-    PrinterConfig config)
-    : ArgumentPrinter(arg_name, config)
-    , dict(dict)
-{
-    // intentionally empty
-}
-
-std::string BitMaskPrinter::print(drakvuf_t drakvuf, drakvuf_trap_info* info, uint64_t argument) const
-{
-    std::stringstream stream;
-    stream << name << "=0x" << std::hex << argument << ": ";
-    if (argument == 0 && this->dict.find(0) != this->dict.end())
-    {
-        stream << this->dict.at(0);
-    }
-    else
-    {
-        bool first = true;
-        for (std::pair<uint64_t, std::string> element : this->dict)
-        {
-            if (argument & element.first)
-            {
-                if (first)
-                {
-                    first = false;
-                }
-                else
-                {
-                    stream << "|";
-                }
-                stream << element.second;
-            }
-        }
-    }
-    return stream.str();
-}
+#endif

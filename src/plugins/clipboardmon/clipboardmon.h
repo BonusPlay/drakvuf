@@ -115,9 +115,8 @@ struct clipboardmon_config
 class clipboardmon: public plugin
 {
 public:
-    const output_format_t format;
 
-    clipboardmon(drakvuf_t drakvuf, const clipboardmon_config* config, output_format_t output);
+    clipboardmon(drakvuf_t drakvuf, const clipboardmon_config* config);
 
     virtual bool stop_impl() override;
 private:

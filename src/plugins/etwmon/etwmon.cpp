@@ -103,7 +103,7 @@
  ***************************************************************************/
 #include <libdrakvuf/libdrakvuf.h>
 #include <plugins/plugins_ex.h>
-#include <plugins/output_format.h>
+#include <slog/slog.hpp>
 #include <algorithm>
 
 #include "etwmon.h"
@@ -238,13 +238,8 @@ wmi_logger_t::wmi_logger_t(etwmon* plugin, vmi_instance_t vmi, addr_t base) : ba
     }
 
     this->cb_ctx = 0;
-    this->name.assign("Unknown");
-    auto unicode_name = drakvuf_read_unicode_va(plugin->drakvuf, base + plugin->offsets[WMI_LOGGER_CONTEXT_LOGGERNAME], 0);
-    if (unicode_name && unicode_name->contents)
-    {
-        this->name.assign(reinterpret_cast<const char*>(unicode_name->contents));
-        vmi_free_unicode_str(unicode_name);
-    }
+    this->name = unicode_string(plugin->drakvuf,
+            base + plugin->offsets[WMI_LOGGER_CONTEXT_LOGGERNAME], 0);
 }
 
 provider_t::provider_t(etwmon* plugin, vmi_instance_t vmi, addr_t base) : base(base)
@@ -294,14 +289,14 @@ provider_t::provider_t(etwmon* plugin, vmi_instance_t vmi, addr_t base) : base(b
     }
 }
 
-void etwmon::report(drakvuf_t drakvuf, const char* type, const char* name, const char* action, addr_t value, addr_t prev_value)
+void etwmon::report(drakvuf_t drakvuf, const char* type, const slog::value& name, const char* action, addr_t value, addr_t prev_value)
 {
-    fmt::print(format, "etwmon", drakvuf, nullptr,
-        keyval("Type",   fmt::Estr(type)),
-        keyval("Name",   fmt::Estr(name)),
-        keyval("Action", fmt::Estr(action)),
-        keyval("Value",  fmt::Xval(value)),
-        keyval("PreviousValue", fmt::Xval(prev_value))
+    slog::emit("etwmon", drakvuf, nullptr,
+        slog::attr("Type",   slog::text(type)),
+        slog::attr("Name",   name),
+        slog::attr("Action", slog::text(action)),
+        slog::attr("Value",  slog::hex(value)),
+        slog::attr("PreviousValue", slog::hex(prev_value))
     );
 }
 
@@ -436,9 +431,8 @@ void etwmon::enumerate_handles(vmi_instance_t vmi)
     }
 }
 
-etwmon::etwmon(const etwmon& other) : pluginex(other.drakvuf, other.format)
+etwmon::etwmon(const etwmon& other) : pluginex(other.drakvuf)
 {
-    this->format                = other.format;
     this->winver                = other.winver;
     this->address_width         = other.address_width;
     this->offsets               = other.offsets;
@@ -475,9 +469,8 @@ bool etwmon::is_supported(drakvuf_t drakvuf, bool quite = false)
     return false;
 }
 
-etwmon::etwmon(drakvuf_t drakvuf, output_format_t output)
-    : pluginex(drakvuf, output), format{ output },
-      logger_cb_ctx_rva{}, etw_state_rva{}, hash_table_rva{},
+etwmon::etwmon(drakvuf_t drakvuf)
+    : pluginex(drakvuf), logger_cb_ctx_rva{}, etw_state_rva{}, hash_table_rva{},
       logger_settings_rva{}, active_loggers_rva{}, silo_globals_va{},
       bucket_size{}, list_entry_size{}, guid_list_head_va{},
       etw_debugger_data_va{}, active_system_loggers{}
@@ -631,11 +624,11 @@ bool etwmon::stop_impl()
             {
                 if (logger.clock_fn != n_logger->clock_fn && logger.clock_fn)
                 {
-                    report(drakvuf, "GetCpuClock", n_logger->name.c_str(), "Modified", n_logger->clock_fn, logger.clock_fn);
+                    report(drakvuf, "GetCpuClock", n_logger->name, "Modified", n_logger->clock_fn, logger.clock_fn);
                 }
                 else if (logger.cb_ctx != n_logger->cb_ctx)
                 {
-                    report(drakvuf, "CallbackContext", n_logger->name.c_str(), "Modified", n_logger->cb_ctx, logger.cb_ctx);
+                    report(drakvuf, "CallbackContext", n_logger->name, "Modified", n_logger->cb_ctx, logger.cb_ctx);
                 }
             }
         }
@@ -676,14 +669,14 @@ bool etwmon::stop_impl()
         {
             if (this->global_callbacks.at(i) != snapshot->global_callbacks.at(i))
             {
-                report(drakvuf, "GlobalCallback", "Anonymous", "Modified", snapshot->global_callbacks.at(i), this->global_callbacks.at(i));
+                report(drakvuf, "GlobalCallback", slog::null, "Modified", snapshot->global_callbacks.at(i), this->global_callbacks.at(i));
             }
         }
 
         for (size_t i = 0; i < this->global_handles.size(); i++)
         {
             if (this->global_handles.at(i) != snapshot->global_handles.at(i))
-                report(drakvuf, "GlobalHandle", "Anonymous", "Modified", snapshot->global_handles.at(i), this->global_handles.at(i));
+                report(drakvuf, "GlobalHandle", slog::null, "Modified", snapshot->global_handles.at(i), this->global_handles.at(i));
         }
 
         if (this->active_system_loggers != snapshot->active_system_loggers)

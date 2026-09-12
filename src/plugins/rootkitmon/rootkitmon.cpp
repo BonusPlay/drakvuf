@@ -103,7 +103,7 @@
  ***************************************************************************/
 #include <unordered_map>
 #include <set>
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 #include "rootkitmon.h"
 #include "private.h"
 
@@ -125,37 +125,33 @@ static inline size_t get_ci_table_size(vmi_instance_t vmi)
     return 0;
 }
 
-static inline void report(drakvuf_t drakvuf, const output_format_t format, const char* type, const char* action,
+static inline void report(drakvuf_t drakvuf, const char* type, const char* action,
     const char* name = nullptr, const addr_t* value = nullptr, const addr_t* prev_value = nullptr,
-    const char* module = nullptr)
+    std::optional<slog::value> module = {})
 {
-    std::optional<fmt::Estr<const char*>> name_opt, module_opt;
-    std::optional<fmt::Xval<addr_t>> value_opt, prev_value_opt;
+    std::optional<slog::value> name_opt;
+    std::optional<slog::value> value_opt, prev_value_opt;
 
     if (name)
     {
-        name_opt = fmt::Estr(name);
+        name_opt = slog::text(name);
     }
     if (value)
     {
-        value_opt = fmt::Xval(*value);
+        value_opt = slog::hex(*value);
     }
     if (prev_value)
     {
-        prev_value_opt = fmt::Xval(*prev_value);
-    }
-    if (module)
-    {
-        module_opt = fmt::Estr(module);
+        prev_value_opt = slog::hex(*prev_value);
     }
 
-    fmt::print(format, "rootkitmon", drakvuf, nullptr,
-        keyval("Type", fmt::Estr(type)),
-        keyval("Action", fmt::Estr(action)),
-        keyval("Name", name_opt),
-        keyval("Value", value_opt),
-        keyval("PreviousValue", prev_value_opt),
-        keyval("Module", module_opt)
+    slog::emit("rootkitmon", drakvuf, nullptr,
+        slog::attr("Type", slog::text(type)),
+        slog::attr("Action", slog::text(action)),
+        slog::attr("Name", name_opt),
+        slog::attr("Value", value_opt),
+        slog::attr("PreviousValue", prev_value_opt),
+        slog::attr("Module", module)
     );
 }
 
@@ -310,7 +306,7 @@ static std::vector<std::pair<addr_t, gdt_entry_t>> enumerate_gdt(vmi_instance_t 
 static event_response_t wfp_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
 {
     auto plugin = static_cast<rootkitmon*>(info->trap->data);
-    report(drakvuf, plugin->format, "Function", "Called", "FwpmCalloutAdd0");
+    report(drakvuf, "Function", "Called", "FwpmCalloutAdd0");
     return VMI_EVENT_RESPONSE_NONE;
 }
 
@@ -324,7 +320,7 @@ static event_response_t halprivatetable_overwrite_cb(drakvuf_t drakvuf, drakvuf_
     // Table size is unknown, assume 0x100 bytes
     if (info->trap_pa >= plugin->halprivatetable && info->trap_pa < plugin->halprivatetable + 0x100)
     {
-        report(drakvuf, plugin->format, "SystemStruct", "Modified", "HalPrivateDispatchTable");
+        report(drakvuf, "SystemStruct", "Modified", "HalPrivateDispatchTable");
     }
     return VMI_EVENT_RESPONSE_NONE;
 }
@@ -481,7 +477,7 @@ bool rootkitmon::enumerate_cores(vmi_instance_t vmi)
  * It is used to calculate checksums of driver sections.
  * @driver - LDR_DATA_TABLE_ENTRY pointer.
 */
-static bool driver_visitor(drakvuf_t drakvuf, const module_info_t* module_info, bool* need_free, bool* need_stop, void* ctx)
+static bool driver_visitor(drakvuf_t drakvuf, const module_info_t* module_info, bool*, bool*, void* ctx)
 {
     auto plugin = static_cast<rootkitmon*>(ctx);
     vmi_lock_guard vmi(drakvuf);
@@ -509,21 +505,21 @@ static bool driver_visitor(drakvuf_t drakvuf, const module_info_t* module_info, 
         auto section_hash = calc_checksum(vmi, virt_addr, aligned_size);
         driver_hash       = merge(driver_hash, section_hash);
     }
-    plugin->driver_sections_checksums[module_info->base_addr] = { std::move(driver_hash), (const char*)module_info->full_name->contents };
+    plugin->driver_sections_checksums[module_info->base_addr] = { std::move(driver_hash), module_info->full_name };
     munmap(module, VMI_PS_4KB);
     return true;
 }
 
-static std::string get_driver_name_by_addr(drakvuf_t drakvuf, addr_t addr)
+static slog::value get_driver_name_by_addr(drakvuf_t drakvuf, addr_t addr)
 {
-    std::pair<std::string, addr_t> context{ "", addr };
+    std::pair<slog::value, addr_t> context{ {}, addr };
 
-    drakvuf_enumerate_drivers(drakvuf, [](drakvuf_t drakvuf, const module_info_t* info, bool*, bool* stop, void* ctx)
+    drakvuf_enumerate_drivers(drakvuf, [](drakvuf_t, const module_info_t* info, bool*, bool* stop, void* ctx)
     {
-        auto pass_context = reinterpret_cast<std::pair<std::string, addr_t>*>(ctx);
+        auto pass_context = static_cast<decltype(context)*>(ctx);
         if (pass_context->second >= info->base_addr && pass_context->second < info->base_addr + info->size)
         {
-            pass_context->first.assign((const char*)info->full_name->contents);
+            pass_context->first = info->full_name;
             *stop = true;
         }
         return true;
@@ -548,7 +544,7 @@ void rootkitmon::check_driver_integrity(drakvuf_t drakvuf)
         const auto& [p_checksum, p_name] = past_drivers_checksums[driver];
         if (checksum != p_checksum)
         {
-            report(drakvuf, this->format, "DriverCRC", "Modified", nullptr, nullptr, nullptr, name.c_str());
+            report(drakvuf, "DriverCRC", "Modified", nullptr, nullptr, nullptr, name);
         }
     }
 }
@@ -569,7 +565,7 @@ void rootkitmon::check_driver_objects(drakvuf_t drakvuf)
         if (VMI_SUCCESS == vmi_read_addr_va(vmi, driver_object + this->offsets[DRIVER_OBJECT_DRIVERSTART], 0, &driver_base))
         {
             auto name = get_driver_name_by_addr(drakvuf, driver_base);
-            report(drakvuf, this->format, type, "Modified", nullptr, nullptr, nullptr, name.c_str());
+            report(drakvuf, type, "Modified", nullptr, nullptr, nullptr, name);
         }
     };
 
@@ -642,12 +638,12 @@ void rootkitmon::check_descriptors(drakvuf_t drakvuf)
         const auto& t_desc_info = past_descriptors[vcpu];
         if (desc_info.idtr_base != t_desc_info.idtr_base)
         {
-            report(drakvuf, this->format, "SystemRegister", "Modified", "IDTR", &desc_info.idtr_base, &t_desc_info.idtr_base);
+            report(drakvuf, "SystemRegister", "Modified", "IDTR", &desc_info.idtr_base, &t_desc_info.idtr_base);
             break;
         }
         if (desc_info.idt_checksum != t_desc_info.idt_checksum)
         {
-            report(drakvuf, this->format, "SystemStruct", "Modified", "IDT");
+            report(drakvuf, "SystemStruct", "Modified", "IDT");
             break;
         }
     }
@@ -657,12 +653,12 @@ void rootkitmon::check_descriptors(drakvuf_t drakvuf)
         const auto& t_desc_info = past_descriptors[vcpu];
         if (desc_info.gdtr_base != t_desc_info.gdtr_base)
         {
-            report(drakvuf, this->format, "SystemRegister", "Modified", "GDTR", &desc_info.gdtr_base, &t_desc_info.gdtr_base);
+            report(drakvuf, "SystemRegister", "Modified", "GDTR", &desc_info.gdtr_base, &t_desc_info.gdtr_base);
             break;
         }
         if (desc_info.gdt.size() != t_desc_info.gdt.size())
         {
-            report(drakvuf, this->format, "SystemStruct", "Modified", "GDT");
+            report(drakvuf, "SystemStruct", "Modified", "GDT");
             break;
         }
         else
@@ -674,7 +670,7 @@ void rootkitmon::check_descriptors(drakvuf_t drakvuf)
 
                 if (addr != t_addr)
                 {
-                    report(drakvuf, this->format, "SystemStruct", "Modified", "GDT", &addr, &t_addr);
+                    report(drakvuf, "SystemStruct", "Modified", "GDT", &addr, &t_addr);
                     break;
                 }
             }
@@ -698,12 +694,12 @@ void rootkitmon::check_ci(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
 
     if (this->ci_enabled != ci_flag)
     {
-        report(drakvuf, format, "SystemStruct", "Modified", "g_CiEnabled");
+        report(drakvuf, "SystemStruct", "Modified", "g_CiEnabled");
     }
 
     if (this->ci_callbacks != calc_checksum(vmi, this->ci_callbacks_va, get_ci_table_size(vmi)))
     {
-        report(drakvuf, format, "SystemStruct", "Modified", "g_CiCallbacks");
+        report(drakvuf, "SystemStruct", "Modified", "g_CiCallbacks");
     }
 }
 
@@ -726,7 +722,7 @@ void rootkitmon::check_filter_callbacks(drakvuf_t drakvuf)
             const auto& new_callbacks = this->flt_callbacks[volume];
             if (callbacks != new_callbacks)
             {
-                report(drakvuf, format, "SystemStruct", "Modified", "VolumeFilterCallbacks");
+                report(drakvuf, "SystemStruct", "Modified", "VolumeFilterCallbacks");
             }
         }
     }
@@ -746,7 +742,7 @@ event_response_t rootkitmon::rop_callback(drakvuf_t drakvuf, drakvuf_trap_info_t
 
         if (rflag & ac_smap_mask)
         {
-            report(drakvuf, plugin->format, "SecurityFeature", "Disabled", "EFLAGS.SMAP");
+            report(drakvuf, "SecurityFeature", "Disabled", "EFLAGS.SMAP");
         }
         // Release memory hook. If EFLAGS.SMAP wasn't set at this point, we don't need this bp anymore
         plugin->rop_hooks.erase(info->trap->breakpoint.addr);
@@ -794,7 +790,7 @@ event_response_t rootkitmon::msr_callback(drakvuf_t drakvuf, drakvuf_trap_info_t
     }
 
     auto name = get_driver_name_by_addr(drakvuf, info->reg->value);
-    report(drakvuf, plugin->format, "SystemRegister", "Modified", "LSTAR", &info->reg->value, &plugin->msr_lstar[info->vcpu], name.empty() ? nullptr : name.c_str());
+    report(drakvuf, "SystemRegister", "Modified", "LSTAR", &info->reg->value, &plugin->msr_lstar[info->vcpu], name);
 
     auto trap = new drakvuf_trap_t
     {
@@ -821,12 +817,12 @@ event_response_t rootkitmon::cr4_callback(drakvuf_t drakvuf, drakvuf_trap_info_t
     PRINT_DEBUG("[ROOTKITMON] CR4: %lx -> %lx\n", info->reg->previous, info->reg->value);
     if (VMI_GET_BIT(info->reg->previous, cr4_smep_mask_bitoffset) == 1 && VMI_GET_BIT(info->reg->value, cr4_smep_mask_bitoffset) == 0)
     {
-        report(drakvuf, plugin->format, "SecurityFeature", "Disabled", "CR4.SMEP");
+        report(drakvuf, "SecurityFeature", "Disabled", "CR4.SMEP");
     }
 
     if (VMI_GET_BIT(info->reg->previous, cr4_smap_mask_bitoffset) == 1 && VMI_GET_BIT(info->reg->value, cr4_smap_mask_bitoffset) == 0)
     {
-        report(drakvuf, plugin->format, "SecurityFeature", "Disabled", "CR4.SMAP");
+        report(drakvuf, "SecurityFeature", "Disabled", "CR4.SMAP");
     }
 
     return VMI_EVENT_RESPONSE_NONE;
@@ -1018,8 +1014,8 @@ void rootkitmon::enumerate_filter_callbacks(vmi_instance_t vmi)
     });
 }
 
-rootkitmon::rootkitmon(drakvuf_t drakvuf, const rootkitmon_config* config, output_format_t output)
-    : pluginex(drakvuf, output), format(output)
+rootkitmon::rootkitmon(drakvuf_t drakvuf, const rootkitmon_config* config)
+    : pluginex(drakvuf)
 {
     if (drakvuf_get_page_mode(drakvuf) != VMI_PM_IA32E)
     {

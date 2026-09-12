@@ -105,10 +105,10 @@
 #include <stdio.h>
 #include <utility>
 
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 #include "privileges.h"
 
-std::pair<std::string, fmt::Aarg> stringify_privilege(struct LUID_AND_ATTRIBUTES& privilege)
+slog::keyval stringify_privilege(struct LUID_AND_ATTRIBUTES& privilege)
 {
     std::string attribute;
     switch (privilege.attributes)
@@ -139,78 +139,78 @@ std::pair<std::string, fmt::Aarg> stringify_privilege(struct LUID_AND_ATTRIBUTES
     switch (privilege.luid)
     {
         case SE_CREATE_TOKEN_PRIVILEGE:
-            return keyval("SE_CREATE_TOKEN_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_CREATE_TOKEN_PRIVILEGE", slog::text(attribute));
         case SE_ASSIGNPRIMARYTOKEN_PRIVILEGE:
-            return keyval("SE_ASSIGNPRIMARYTOKEN_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_ASSIGNPRIMARYTOKEN_PRIVILEGE", slog::text(attribute));
         case SE_LOCK_MEMORY_PRIVILEGE:
-            return keyval("SE_LOCK_MEMORY_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_LOCK_MEMORY_PRIVILEGE", slog::text(attribute));
         case SE_INCREASE_QUOTA_PRIVILEGE:
-            return keyval("SE_INCREASE_QUOTA_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_INCREASE_QUOTA_PRIVILEGE", slog::text(attribute));
         case SE_MACHINE_ACCOUNT_PRIVILEGE:
-            return keyval("SE_MACHINE_ACCOUNT_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_MACHINE_ACCOUNT_PRIVILEGE", slog::text(attribute));
         case SE_TCB_PRIVILEGE:
-            return keyval("SE_TCB_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_TCB_PRIVILEGE", slog::text(attribute));
         case SE_SECURITY_PRIVILEGE:
-            return keyval("SE_SECURITY_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_SECURITY_PRIVILEGE", slog::text(attribute));
         case SE_TAKE_OWNERSHIP_PRIVILEGE:
-            return keyval("SE_TAKE_OWNERSHIP_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_TAKE_OWNERSHIP_PRIVILEGE", slog::text(attribute));
         case SE_LOAD_DRIVER_PRIVILEGE:
-            return keyval("SE_LOAD_DRIVER_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_LOAD_DRIVER_PRIVILEGE", slog::text(attribute));
         case SE_SYSTEM_PROFILE_PRIVILEGE:
-            return keyval("SE_SYSTEM_PROFILE_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_SYSTEM_PROFILE_PRIVILEGE", slog::text(attribute));
         case SE_SYSTEMTIME_PRIVILEGE:
-            return keyval("SE_SYSTEMTIME_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_SYSTEMTIME_PRIVILEGE", slog::text(attribute));
         case SE_PROF_SINGLE_PROCESS_PRIVILEGE:
-            return keyval("SE_PROF_SINGLE_PROCESS_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_PROF_SINGLE_PROCESS_PRIVILEGE", slog::text(attribute));
         case SE_INC_BASE_PRIORITY_PRIVILEGE:
-            return keyval("SE_INC_BASE_PRIORITY_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_INC_BASE_PRIORITY_PRIVILEGE", slog::text(attribute));
         case SE_CREATE_PAGEFILE_PRIVILEGE:
-            return keyval("SE_CREATE_PAGEFILE_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_CREATE_PAGEFILE_PRIVILEGE", slog::text(attribute));
         case SE_CREATE_PERMANENT_PRIVILEGE:
-            return keyval("SE_CREATE_PERMANENT_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_CREATE_PERMANENT_PRIVILEGE", slog::text(attribute));
         case SE_BACKUP_PRIVILEGE:
-            return keyval("SE_BACKUP_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_BACKUP_PRIVILEGE", slog::text(attribute));
         case SE_RESTORE_PRIVILEGE:
-            return keyval("SE_RESTORE_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_RESTORE_PRIVILEGE", slog::text(attribute));
         case SE_SHUTDOWN_PRIVILEGE:
-            return keyval("SE_SHUTDOWN_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_SHUTDOWN_PRIVILEGE", slog::text(attribute));
         case SE_DEBUG_PRIVILEGE:
-            return keyval("SE_DEBUG_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_DEBUG_PRIVILEGE", slog::text(attribute));
         case SE_AUDIT_PRIVILEGE:
-            return keyval("SE_AUDIT_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_AUDIT_PRIVILEGE", slog::text(attribute));
         case SE_SYSTEM_ENVIRONMENT_PRIVILEGE:
-            return keyval("SE_SYSTEM_ENVIRONMENT_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_SYSTEM_ENVIRONMENT_PRIVILEGE", slog::text(attribute));
         case SE_CHANGE_NOTIFY_PRIVILEGE:
-            return keyval("SE_CHANGE_NOTIFY_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_CHANGE_NOTIFY_PRIVILEGE", slog::text(attribute));
         case SE_REMOTE_SHUTDOWN_PRIVILEGE:
-            return keyval("SE_REMOTE_SHUTDOWN_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_REMOTE_SHUTDOWN_PRIVILEGE", slog::text(attribute));
         case SE_UNDOCK_PRIVILEGE:
-            return keyval("SE_UNDOCK_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_UNDOCK_PRIVILEGE", slog::text(attribute));
         case SE_SYNC_AGENT_PRIVILEGE:
-            return keyval("SE_SYNC_AGENT_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_SYNC_AGENT_PRIVILEGE", slog::text(attribute));
         case SE_ENABLE_DELEGATION_PRIVILEGE:
-            return keyval("SE_ENABLE_DELEGATION_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_ENABLE_DELEGATION_PRIVILEGE", slog::text(attribute));
         case SE_MANAGE_VOLUME_PRIVILEGE:
-            return keyval("SE_MANAGE_VOLUME_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_MANAGE_VOLUME_PRIVILEGE", slog::text(attribute));
         case SE_IMPERSONATE_PRIVILEGE:
-            return keyval("SE_IMPERSONATE_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_IMPERSONATE_PRIVILEGE", slog::text(attribute));
         case SE_CREATE_GLOBAL_PRIVILEGE:
-            return keyval("SE_CREATE_GLOBAL_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_CREATE_GLOBAL_PRIVILEGE", slog::text(attribute));
         case SE_TRUSTED_CREDMAN_ACCESS_PRIVILEGE:
-            return keyval("SE_TRUSTED_CREDMAN_ACCESS_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_TRUSTED_CREDMAN_ACCESS_PRIVILEGE", slog::text(attribute));
         case SE_RELABEL_PRIVILEGE:
-            return keyval("SE_RELABEL_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_RELABEL_PRIVILEGE", slog::text(attribute));
         case SE_INC_WORKING_SET_PRIVILEGE:
-            return keyval("SE_INC_WORKING_SET_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_INC_WORKING_SET_PRIVILEGE", slog::text(attribute));
         case SE_TIME_ZONE_PRIVILEGE:
-            return keyval("SE_TIME_ZONE_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_TIME_ZONE_PRIVILEGE", slog::text(attribute));
         case SE_CREATE_SYMBOLIC_LINK_PRIVILEGE:
-            return keyval("SE_CREATE_SYMBOLIC_LINK_PRIVILEGE", fmt::Rstr(attribute));
+            return slog::attr("SE_CREATE_SYMBOLIC_LINK_PRIVILEGE", slog::text(attribute));
         default:
         {
             char tmp[64] = {0};
             snprintf(tmp, 64, "0x%" PRIx64, privilege.luid);
-            return keyval(tmp, fmt::Rstr(attribute));
+            return slog::attr(tmp, slog::text(attribute));
         }
     }
 }

@@ -118,7 +118,7 @@ public:
     std::unique_ptr<win_procdump2> wp;
     std::unique_ptr<linux_procdump> lp;
 
-    procdump2(drakvuf_t drakvuf, const procdump2_config* config, output_format_t output);
+    procdump2(drakvuf_t drakvuf, const procdump2_config* config);
     ~procdump2() = default;
 };
 

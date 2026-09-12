@@ -106,7 +106,7 @@
 #include <libvmi/libvmi.h>
 
 #include "plugins/helpers/hooks.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 #include "ptracemon.h"
 #include "private.h"
 
@@ -146,10 +146,10 @@ event_response_t ptracemon::ptrace_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* in
         return VMI_EVENT_RESPONSE_NONE;
     }
 
-    fmt::print(this->m_output_format, "ptracemon", drakvuf, info,
-        keyval("Type", fmt::Rstr(request_str)),
-        keyval("TargetPID", fmt::Nval(target_process_data.pid)),
-        keyval("TargetProcessName", fmt::Estr(target_process_data.name))
+    slog::emit("ptracemon", drakvuf, info,
+        slog::attr("Type", slog::text(request_str)),
+        slog::attr("TargetPID", slog::number(target_process_data.pid)),
+        slog::attr("TargetProcessName", slog::text(target_process_data.name))
     );
 
     g_free(const_cast<char*>(target_process_data.name));
@@ -157,7 +157,7 @@ event_response_t ptracemon::ptrace_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* in
     return VMI_EVENT_RESPONSE_NONE;
 }
 
-ptracemon::ptracemon(drakvuf_t drakvuf, output_format_t output) : pluginex(drakvuf, output)
+ptracemon::ptracemon(drakvuf_t drakvuf) : pluginex(drakvuf)
 {
     if (!drakvuf_get_kernel_struct_members_array_rva(drakvuf, pt_regs_offsets_name, this->offsets.size(), this->offsets.data()))
     {

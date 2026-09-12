@@ -395,12 +395,11 @@ class drakvuf_plugins
 {
 private:
     drakvuf_t drakvuf;
-    output_format_t output;
     os_t os;
     std::array<std::unique_ptr<plugin>, __DRAKVUF_PLUGIN_LIST_MAX> plugins;
 
 public:
-    drakvuf_plugins(drakvuf_t drakvuf, output_format_t output, os_t os);
+    drakvuf_plugins(drakvuf_t drakvuf, os_t os);
     int start(drakvuf_plugin_t plugin, const plugins_options* config);
     int stop(drakvuf_plugin_t plugin);
 };

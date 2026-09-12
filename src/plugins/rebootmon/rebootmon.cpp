@@ -105,12 +105,12 @@
 #include "rebootmon.h"
 #include "linux.h"
 
-rebootmon::rebootmon(drakvuf_t drakvuf, const rebootmon_config* c, output_format_t output)
-    : pluginex(drakvuf, output)
+rebootmon::rebootmon(drakvuf_t drakvuf, const rebootmon_config* c)
+    : pluginex(drakvuf)
 {
     auto os = drakvuf_get_os_type(drakvuf);
     if (os == VMI_OS_WINDOWS)
         throw -1;
     else
-        this->l_impl = std::make_unique<linux_rebootmon>(drakvuf, c, output);
+        this->l_impl = std::make_unique<linux_rebootmon>(drakvuf, c);
 }

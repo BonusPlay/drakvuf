@@ -106,35 +106,17 @@
 #include <cassert>
 
 #include "windowmon.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 
-static char const* get_value_name(unicode_string_t* us)
+static slog::value get_value_name(unicode_string_t* us)
 {
-    char* name = nullptr;
-
-    if (us && us->length > 0)
-    {
-        auto len = strlen((const char*)us->contents);
-        auto full_len = len + 3;
-
-        name = (char*)g_try_malloc0(full_len);
-
-        name[0] = '"';
-        g_strlcpy(name + 1, (const char*)us->contents, len + 1);
-        name[full_len - 2] = '"';
-    }
-    else
-    {
-        name = g_strdup("NULL");
-    }
-
-    return name;
+    if (us && us->contents && us->length > 0)
+        return slog::value(us);
+    return slog::null;
 }
 
 static event_response_t cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
 {
-    windowmon* c = static_cast<windowmon*>(info->trap->data);
-
     auto class_va = drakvuf_get_function_argument(drakvuf, info, 3);
     auto name_va = drakvuf_get_function_argument(drakvuf, info, 4);
 
@@ -144,16 +126,13 @@ static event_response_t cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
     auto window_class = get_value_name(class_us);
     auto window_name = get_value_name(name_us);
 
-    fmt::print(c->format, "windowmon", drakvuf, info,
-        keyval("Class", fmt::Rstr(window_class)),
-        keyval("Name", fmt::Rstr(window_name))
+    slog::emit("windowmon", drakvuf, info,
+        slog::attr("Class", window_class),
+        slog::attr("Name", window_name)
     );
 
     vmi_free_unicode_str(class_us);
     vmi_free_unicode_str(name_us);
-    g_free((gpointer)window_class);
-    g_free((gpointer)window_name);
-
     return VMI_EVENT_RESPONSE_NONE;
 }
 
@@ -243,8 +222,7 @@ static bool register_trap( drakvuf_t drakvuf, json_object* profile_json, const c
     return true;
 }
 
-windowmon::windowmon(drakvuf_t drakvuf, const windowmon_config* c, output_format_t output)
-    : format(output)
+windowmon::windowmon(drakvuf_t drakvuf, const windowmon_config* c)
 {
     if ( !c->win32k_profile )
     {

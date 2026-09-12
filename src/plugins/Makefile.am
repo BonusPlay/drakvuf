@@ -424,9 +424,7 @@ endif
 
 ###############################################################################
 sources += plugins.cpp plugins.h plugins_ex.cpp plugins_ex.h plugin_utils.cpp plugin_utils.h
-sources += output_format.h output_format/common.h output_format/csvfmt.h output_format/deffmt.h output_format/jsonfmt.h output_format/kvfmt.h
-sources += output_format/xfmt.h output_format/ostream.h output_format/ostream.cpp
-sources += helpers/type_traits.h helpers/hooks.h helpers/unicode_string.h helpers/vmi_lock_guard.h helpers/profile_guard.h helpers/exclude_matcher.h helpers/exclude_matcher.cpp
+sources += helpers/hooks.h helpers/unicode_string.h helpers/vmi_lock_guard.h helpers/profile_guard.h helpers/exclude_matcher.h helpers/exclude_matcher.cpp
 
 AM_CPPFLAGS = $(CPPFLAGS) -I$(top_srcdir) -I$(top_srcdir)/src -I$(srcdir) -I$(srcdir)/helpers
 AM_CPPFLAGS += $(VMI_CFLAGS)
@@ -492,7 +490,7 @@ check_PROGRAMS =
 check_PROGRAMS += plugin_utils_check
 plugin_utils_check_SOURCES = plugin_utils_check.cpp
 plugin_utils_check_CFLAGS = $(CHECK_CFLAGS)
-plugin_utils_check_LDADD = $(CHECK_LIBS) plugin_utils.lo
+plugin_utils_check_LDADD = $(CHECK_LIBS) plugin_utils.lo ../slog/libslog.la
 
 check_PROGRAMS += syscalls/check
 syscalls_check_SOURCES = syscalls/check.cpp
@@ -505,12 +503,6 @@ procmon_check_SOURCES = procmon/check.cpp
 procmon_check_CFLAGS = $(CHECK_CFLAGS)
 procmon_check_LDADD = $(CHECK_LIBS) procmon/linux_utils.lo procmon/winnt.lo
 endif
-
-# Unit tests for output format
-check_PROGRAMS += output_format/check
-output_format_check_SOURCES = output_format/check.cpp
-output_format_check_CFLAGS = $(CHECK_CFLAGS) $(ZLIB_CFLAGS)
-output_format_check_LDADD = $(CHECK_LIBS) $(ZLIB_LIBS)
 
 TESTS = $(check_PROGRAMS)
 

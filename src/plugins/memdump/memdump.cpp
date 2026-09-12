@@ -102,16 +102,15 @@
  *                                                                         *
  ***************************************************************************/
 
+#include <format>
 #include <inttypes.h>
 #include <assert.h>
 
 #include "plugins/plugins.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 
 #include "memdump.h"
 #include "private.h"
-
-#define DUMP_NAME_PLACEHOLDER "(not configured)"
 
 static void save_file_metadata(const drakvuf_trap_info_t* info,
     const char* file_path,
@@ -123,38 +122,27 @@ static void save_file_metadata(const drakvuf_trap_info_t* info,
     int sequence_number,
     extras_t* extras)
 {
-    char* file = NULL;
-    if ( asprintf(&file, "%s.metadata", file_path) < 0 )
-        return;
-
-    FILE* fp = fopen(file, "w");
-    free(file);
-    if (!fp)
-        return;
-
-    json_object* jobj = json_object_new_object();
-    json_object_object_add(jobj, "Method", json_object_new_string(method));
-    json_object_object_add(jobj, "DumpReason", json_object_new_string(dump_reason));
-    json_object_object_add(jobj, "DumpAddress", json_object_new_string_fmt("0x%" PRIx64, dump_address));
-    json_object_object_add(jobj, "DumpSize", json_object_new_string_fmt("0x%" PRIx64, dump_size));
-    json_object_object_add(jobj, "PID", json_object_new_int(info->attached_proc_data.pid));
-    json_object_object_add(jobj, "PPID", json_object_new_int(info->attached_proc_data.ppid));
-    json_object_object_add(jobj, "ProcessName", json_object_new_string(info->attached_proc_data.name));
+    slog::keyval_array record;
+    record.push_back(slog::attr("Method", slog::text(method)));
+    record.push_back(slog::attr("DumpReason", slog::text(dump_reason)));
+    record.push_back(slog::attr("DumpAddress", slog::hex(dump_address)));
+    record.push_back(slog::attr("DumpSize", slog::hex(dump_size)));
+    record.push_back(slog::attr("PID", slog::number(info->attached_proc_data.pid)));
+    record.push_back(slog::attr("PPID", slog::number(info->attached_proc_data.ppid)));
+    record.push_back(slog::attr("ProcessName", slog::text(info->attached_proc_data.name)));
 
     if (extras && extras->type == WriteVirtualMemoryExtras)
     {
-        json_object_object_add(jobj, "TargetPID", json_object_new_int(extras->write_virtual_memory_extras.target_pid));
-        json_object_object_add(jobj, "TargetProcessName", json_object_new_string(extras->write_virtual_memory_extras.target_name));
-        json_object_object_add(jobj, "TargetBaseAddress", json_object_new_string_fmt("0x%" PRIx64, extras->write_virtual_memory_extras.base_address));
+        record.push_back(slog::attr("TargetPID", slog::number(extras->write_virtual_memory_extras.target_pid)));
+        record.push_back(slog::attr("TargetProcessName", slog::text(extras->write_virtual_memory_extras.target_name)));
+        record.push_back(slog::attr("TargetBaseAddress", slog::hex(extras->write_virtual_memory_extras.base_address)));
     }
 
-    json_object_object_add(jobj, "DataFileName", json_object_new_string(data_file_name));
-    json_object_object_add(jobj, "SequenceNumber", json_object_new_int(sequence_number));
+    record.push_back(slog::attr("DataFileName", slog::text(data_file_name)));
+    record.push_back(slog::attr("SequenceNumber", slog::number(sequence_number)));
 
-    fprintf(fp, "%s\n", json_object_get_string(jobj));
-    fclose(fp);
-
-    json_object_put(jobj);
+    if (!slog::write_record(std::format("{}.metadata", file_path), record))
+        PRINT_DEBUG("[MEMDUMP] Failed to write metadata file\n");
 }
 
 /**
@@ -196,16 +184,12 @@ bool dump_memory_region(
 
     size_t tmp_len_bytes = len_bytes;
 
-    std::optional<fmt::Nval<decltype(extras->write_virtual_memory_extras.target_pid)>> target_pid;
-    std::optional<fmt::Xval<decltype(extras->write_virtual_memory_extras.base_address)>> write_addr;
-
     int sequence_number = ++plugin->dumps_count;
 
     if (!plugin->memdump_dir)
     {
         // dry run, just print that the dump would be saved
         ret = true;
-        display_file = DUMP_NAME_PLACEHOLDER;
         goto printout;
     }
 
@@ -298,28 +282,23 @@ printout:
     // scoping the block as goto jumps
     // bypasses variable initialization
     {
-        auto default_print = std::make_tuple(
-                keyval("DumpReason", fmt::Qstr(reason)),
-                keyval("DumpPID", fmt::Nval(info->attached_proc_data.pid)),
-                keyval("DumpAddr", fmt::Xval(dump_addr, false)),
-                keyval("DumpSize", fmt::Xval(len_bytes)),
-                keyval("DumpFilename", fmt::Qstr(display_file)),
-                keyval("DumpsCount", fmt::Nval(sequence_number))
-            );
+        slog::keyval_array fields
+        {
+            slog::attr("DumpReason", slog::text(reason)),
+            slog::attr("DumpPID", slog::number(info->attached_proc_data.pid)),
+            slog::attr("DumpAddr", slog::hex(dump_addr)),
+            slog::attr("DumpSize", slog::hex(len_bytes)),
+            slog::attr("DumpFilename", slog::text(display_file)),
+            slog::attr("DumpsCount", slog::number(sequence_number))
+        };
         if (print_extras)
         {
-            target_pid = fmt::Nval(extras->write_virtual_memory_extras.target_pid);
-            write_addr = fmt::Xval(extras->write_virtual_memory_extras.base_address, false);
-            auto extra_arguments = std::make_tuple(
-                    keyval("TargetPID", target_pid),
-                    keyval("WriteAddr", write_addr)
-                );
-            fmt::print(plugin->m_output_format, "memdump", drakvuf, info, default_print, extra_arguments);
+            fields.push_back(slog::attr("TargetPID",
+                    slog::number(extras->write_virtual_memory_extras.target_pid)));
+            fields.push_back(slog::attr("WriteAddr",
+                    slog::hex(extras->write_virtual_memory_extras.base_address)));
         }
-        else
-        {
-            fmt::print(plugin->m_output_format, "memdump", drakvuf, info, default_print);
-        }
+        slog::emit("memdump", drakvuf, info, std::move(fields));
     }
 
 done:
@@ -778,9 +757,6 @@ static event_response_t write_virtual_memory_hook_cb(drakvuf_t drakvuf, drakvuf_
         target_name = drakvuf_get_process_name(drakvuf, process_addr, true);
     }
 
-    if (!target_name)
-        target_name = g_strdup("<UNKNOWN>");
-
     extras_t extras =
     {
         .type = WriteVirtualMemoryExtras,
@@ -971,8 +947,8 @@ void memdump::setup_usermode_dotnet_hooks(const memdump_config* c)
         PRINT_DEBUG("mscorwks.dll profile not found, memdump will proceed without some .NET hooks\n");
 }
 
-memdump::memdump(drakvuf_t drakvuf, const memdump_config* c, output_format_t output)
-    : pluginex(drakvuf, output)
+memdump::memdump(drakvuf_t drakvuf, const memdump_config* c)
+    : pluginex(drakvuf)
     , dumps_count()
 {
     this->memdump_dir = c->memdump_dir;
@@ -1028,7 +1004,7 @@ memdump::memdump(drakvuf_t drakvuf, const memdump_config* c, output_format_t out
         if (!register_trap(nullptr, shellcode_cb, bp.for_syscall_name("NtFreeVirtualMemory")))
             throw -1;
 
-    this->userhook_init(c, output);
+    this->userhook_init(c);
 }
 
 memdump::~memdump()

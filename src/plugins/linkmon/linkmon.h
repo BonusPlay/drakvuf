@@ -118,7 +118,7 @@ struct linkmon_config
 class linkmon : public pluginex
 {
 public:
-    linkmon(drakvuf_t drakvuf, const linkmon_config* config, output_format_t output);
+    linkmon(drakvuf_t drakvuf, const linkmon_config* config);
     ~linkmon() = default;
 private:
 

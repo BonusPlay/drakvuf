@@ -118,6 +118,15 @@ extern "C" {
 
 typedef struct injector* injector_t;
 
+// The C injector formats its own output independently of the C++ logger.
+typedef enum
+{
+    OUTPUT_DEFAULT,
+    OUTPUT_CSV,
+    OUTPUT_KV,
+    OUTPUT_JSON,
+} output_format_t;
+
 typedef enum
 {
     STEP1,

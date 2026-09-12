@@ -106,13 +106,11 @@
 #include <cassert>
 
 #include "clipboardmon.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 
 static event_response_t cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
 {
-    clipboardmon* c = static_cast<clipboardmon*>(info->trap->data);
-
-    fmt::print(c->format, "clipboardmon", drakvuf, info);
+    slog::emit("clipboardmon", drakvuf, info);
 
     return VMI_EVENT_RESPONSE_NONE;
 }
@@ -205,8 +203,7 @@ static bool register_trap( drakvuf_t drakvuf, json_object* profile_json, const c
     return true;
 }
 
-clipboardmon::clipboardmon(drakvuf_t drakvuf, const clipboardmon_config* c, output_format_t output)
-    : format(output)
+clipboardmon::clipboardmon(drakvuf_t drakvuf, const clipboardmon_config* c)
 {
     if ( !c->win32k_profile )
     {

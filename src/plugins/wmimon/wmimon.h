@@ -118,7 +118,7 @@ struct wmimon_config
 class wmimon: public pluginex
 {
 public:
-    wmimon(drakvuf_t drakvuf, const wmimon_config* c, output_format_t output);
+    wmimon(drakvuf_t drakvuf, const wmimon_config* c);
     ~wmimon()
     {
         delete[] m_offsets;

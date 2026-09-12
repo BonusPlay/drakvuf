@@ -103,7 +103,7 @@
  ***************************************************************************/
 
 #include "plugins/plugins.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 
 #include "linkmon.h"
 #include "private.h"
@@ -198,10 +198,10 @@ event_response_t linkmon::setinformation_cb(drakvuf_t,
     }
     vmi_free_unicode_str(file_name);
 
-    fmt::print(this->m_output_format, "linkmon", drakvuf, info,
-        keyval("FileName", fmt::Qstr(file_name_full)),
-        keyval("LinkType", fmt::Qstr("hardlink")),
-        keyval("LinkTarget", fmt::Qstr(target_file_name_str)));
+    slog::emit("linkmon", drakvuf, info,
+        slog::attr("FileName", slog::text(file_name_full)),
+        slog::attr("LinkType", slog::text("hardlink")),
+        slog::attr("LinkTarget", slog::text(target_file_name_str)));
 
     g_free(file_name_full);
 
@@ -254,13 +254,11 @@ event_response_t linkmon::print_junction(drakvuf_t,
         return VMI_EVENT_RESPONSE_NONE;
     }
 
-    std::string target_file_name_str {(char*)substitute_name->contents};
+    slog::emit("linkmon", drakvuf, info,
+        slog::attr("FileName", slog::text(file_name_str)),
+        slog::attr("LinkType", slog::text("junction")),
+        slog::attr("LinkTarget", substitute_name));
     vmi_free_unicode_str(substitute_name);
-
-    fmt::print(this->m_output_format, "linkmon", drakvuf, info,
-        keyval("FileName", fmt::Qstr(file_name_str)),
-        keyval("LinkType", fmt::Qstr("junction")),
-        keyval("LinkTarget", fmt::Qstr(target_file_name_str)));
 
     return VMI_EVENT_RESPONSE_NONE;
 }
@@ -318,14 +316,12 @@ event_response_t linkmon::print_symlink(drakvuf_t,
         PRINT_DEBUG("[LINKMON] Failed to read SubstituteName\n");
         return VMI_EVENT_RESPONSE_NONE;
     }
-    std::string target_file_name_str {(char*)substitute_name->contents};
+    slog::emit("linkmon", drakvuf, info,
+        slog::attr("FileName", slog::text(file_name_str)),
+        slog::attr("LinkType", slog::text("symlink")),
+        slog::attr("Flags", slog::hex(flags)),
+        slog::attr("LinkTarget", substitute_name));
     vmi_free_unicode_str(substitute_name);
-
-    fmt::print(this->m_output_format, "linkmon", drakvuf, info,
-        keyval("FileName", fmt::Qstr(file_name_str)),
-        keyval("LinkType", fmt::Qstr("symlink")),
-        keyval("Flags", fmt::Xval(flags)),
-        keyval("LinkTarget", fmt::Qstr(target_file_name_str)));
 
     return VMI_EVENT_RESPONSE_NONE;
 }
@@ -369,9 +365,8 @@ event_response_t linkmon::ntfscontrolfile_cb(drakvuf_t,
 }
 
 linkmon::linkmon(drakvuf_t drakvuf,
-    const linkmon_config* c,
-    output_format_t output)
-    : pluginex(drakvuf, output)
+    const linkmon_config* c)
+    : pluginex(drakvuf)
 {
     if (!c->ole32_profile)
     {

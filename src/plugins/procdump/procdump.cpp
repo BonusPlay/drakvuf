@@ -103,9 +103,8 @@
  ***************************************************************************/
 
 #include <fcntl.h>
+#include <format>
 #include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
 #include <vector>
 #include <cpuid.h>
 
@@ -115,30 +114,23 @@
 #include "procdump.h"
 #include "private.h"
 #include "minidump.h"
-#include "plugins/output_format.h"
-
-using namespace std::string_literals;
+#include "slog/slog.hpp"
 
 static void save_file_metadata(struct procdump_ctx* ctx, proc_data_t* proc_data)
 {
     auto plugin = ctx->plugin;
-    FILE* fp = fopen((plugin->procdump_dir + "/"s + ctx->data_file_name + ".metadata"s).c_str(), "w");
-    if (!fp)
-        return;
 
-    json_object* jobj = json_object_new_object();
-    json_object_object_add(jobj, "DumpSize", json_object_new_string_fmt("0x%" PRIx64, ctx->size));
-    json_object_object_add(jobj, "PID", json_object_new_int(proc_data->pid));
-    json_object_object_add(jobj, "PPID", json_object_new_int(proc_data->ppid));
-    json_object_object_add(jobj, "ProcessName", json_object_new_string(proc_data->name));
-    json_object_object_add(jobj, "Compression", json_object_new_string(plugin->use_compression ? "gzip" : "none"));
+    slog::keyval_array record;
+    record.push_back(slog::attr("DumpSize", slog::hex(ctx->size)));
+    record.push_back(slog::attr("PID", slog::number(proc_data->pid)));
+    record.push_back(slog::attr("PPID", slog::number(proc_data->ppid)));
+    record.push_back(slog::attr("ProcessName", slog::text(proc_data->name)));
+    record.push_back(slog::attr("Compression", slog::text(plugin->use_compression ? "gzip" : "none")));
+    record.push_back(slog::attr("DataFileName", slog::text(ctx->data_file_name.c_str())));
 
-    json_object_object_add(jobj, "DataFileName", json_object_new_string(ctx->data_file_name.c_str()));
-
-    fprintf(fp, "%s\n", json_object_get_string(jobj));
-    fclose(fp);
-
-    json_object_put(jobj);
+    const auto out_file = std::format("{}/{}.metadata", plugin->procdump_dir, ctx->data_file_name);
+    if (!slog::write_record(out_file, record))
+        PRINT_DEBUG("[PROCDUMP] Failed to write metadata file\n");
 }
 
 static void free_pool(pool_map_t& pools, addr_t va)
@@ -511,10 +503,10 @@ static event_response_t detach(drakvuf_t drakvuf, drakvuf_trap_info_t* info,
     {
         // If there is no VADs left than the file have been processed
         save_file_metadata(ctx, &info->proc_data);
-        fmt::print(ctx->plugin->m_output_format, "procdump", drakvuf, info,
-            keyval("DumpReason", fmt::Qstr("TerminateProcess")),
-            keyval("DumpSize", fmt::Nval(ctx->size)),
-            keyval("SN", fmt::Nval(ctx->idx))
+        slog::emit("procdump", drakvuf, info,
+            slog::attr("DumpReason", slog::text("TerminateProcess")),
+            slog::attr("DumpSize", slog::number(ctx->size)),
+            slog::attr("SN", slog::number(ctx->idx))
         );
     }
 
@@ -910,9 +902,10 @@ static event_response_t terminate_process_cb(drakvuf_t drakvuf,
 
     try
     {
-        std::string data_file_name = "procdump."s + std::to_string(ctx->idx);
+        const auto data_file_name = std::format("procdump.{}", ctx->idx);
         ctx->data_file_name = data_file_name;
-        ctx->writer = ProcdumpWriterFactory::build(plugin->procdump_dir + "/"s + data_file_name, plugin->use_compression);
+        const auto writer_path = std::format("{}/{}", plugin->procdump_dir, data_file_name);
+        ctx->writer = ProcdumpWriterFactory::build(writer_path, plugin->use_compression);
     }
     catch (int)
     {
@@ -968,9 +961,8 @@ static event_response_t terminate_process_cb(drakvuf_t drakvuf,
     return detach(drakvuf, info, ctx);
 }
 
-procdump::procdump(drakvuf_t drakvuf, const procdump_config* config,
-    output_format_t output)
-    : pluginex(drakvuf, output)
+procdump::procdump(drakvuf_t drakvuf, const procdump_config* config)
+    : pluginex(drakvuf)
     , terminated_processes(config->terminated_processes)
     , procdump_dir{config->procdump_dir ?: ""}
     , use_compression{config->compress_procdumps}

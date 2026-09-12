@@ -167,7 +167,7 @@ static void on_dll_hooked(drakvuf_t drakvuf, const dll_view_t* dll, const std::v
     PRINT_DEBUG("[MEMDUMP] DLL hooked - done\n");
 }
 
-void memdump::userhook_init(const memdump_config* c, output_format_t output)
+void memdump::userhook_init(const memdump_config* c)
 {
     if (!drakvuf_are_userhooks_supported(drakvuf))
     {
@@ -233,12 +233,12 @@ void memdump::setup_dotnet_hooks(const char* dll_name, const char* profile, bool
     if (is32_bit)
     {
         PRINT_DEBUG("[MEMDUMP.NET] hooking 32bit LoadImage\n");
-        this->wanted_hooks_32.add_hook(dll_name, "AssemblyNative::LoadImage", func_rva, actions, std::vector< std::unique_ptr< ArgumentPrinter > > {});
+        this->wanted_hooks_32.add_hook(dll_name, "AssemblyNative::LoadImage", func_rva, actions, std::vector<argument_spec> {});
     }
     else
     {
         PRINT_DEBUG("[MEMDUMP.NET] hooking 64bit LoadImage\n");
-        this->wanted_hooks_64.add_hook(dll_name, "AssemblyNative::LoadImage", func_rva, actions, std::vector< std::unique_ptr< ArgumentPrinter > > {});
+        this->wanted_hooks_64.add_hook(dll_name, "AssemblyNative::LoadImage", func_rva, actions, std::vector<argument_spec> {});
     }
 }
 

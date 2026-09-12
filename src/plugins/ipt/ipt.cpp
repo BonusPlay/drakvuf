@@ -108,8 +108,6 @@
 #include <inttypes.h>
 #include <sys/stat.h>
 
-#include "plugins/output_format.h"
-
 #include "ipt.h"
 
 uint64_t pack_payload(uint32_t cmd, uint32_t data)
@@ -193,8 +191,8 @@ event_response_t ipt::catchall_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
     return VMI_EVENT_RESPONSE_NONE;
 }
 
-ipt::ipt(drakvuf_t drakvuf, const ipt_config& config, output_format_t output)
-    : pluginex(drakvuf, output)
+ipt::ipt(drakvuf_t drakvuf, const ipt_config& config)
+    : pluginex(drakvuf)
     , num_vcpus_{0}
     , drakvuf_{drakvuf}
 {

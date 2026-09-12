@@ -107,7 +107,7 @@
 #include <string>
 #include <vector>
 
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 
 #include "linux.h"
 
@@ -246,33 +246,31 @@ void linux_syscalls::print_syscall(drakvuf_t drakvuf, drakvuf_trap_info_t* info,
 {
     auto params = libhook::GetTrapParams<linux_syscall_data>(info);
 
-    this->fmt_args.clear();
+    std::vector<slog::keyval> fmt_args;
     for (size_t i = 0; i < arguments.size(); i++)
     {
         auto str = this->parse_argument(drakvuf, info, params->sc->args[i], arguments[i]);
-        if (!str.empty())
-            this->fmt_args.push_back(keyval(params->sc->args[i].name, fmt::Estr(str)));
+        if (str)
+            fmt_args.push_back(slog::attr(params->sc->args[i].name, *str));
         else
         {
             uint64_t value = this->transform_value(drakvuf, info, params->sc->args[i], arguments[i]);
-            this->fmt_args.push_back(keyval(params->sc->args[i].name, fmt::Xval(value)));
+            fmt_args.push_back(slog::attr(params->sc->args[i].name, slog::hex(value)));
         }
     }
 
-    char* tmp = drakvuf_get_process_name(drakvuf, info->proc_data.base_addr, false);
-    std::string thread_name = tmp ?: "";
-    g_free(tmp);
+    char* thread_name = drakvuf_get_process_name(drakvuf, info->proc_data.base_addr, false);
 
-    fmt::print(this->m_output_format, "syscall", drakvuf, info,
-        keyval("ThreadName", fmt::Estr(thread_name)),
-        keyval("Module", fmt::Qstr(std::move(info->trap->breakpoint.module))),
-        keyval("vCPU", fmt::Nval(info->vcpu)),
-        keyval("CR3", fmt::Xval(info->regs->cr3)),
-        keyval("Syscall", fmt::Nval((uint64_t)(params->num))),
-        keyval("NArgs", fmt::Nval(params->sc->num_args)),
-        keyval("Type", fmt::Estr(params->type)),
-        this->fmt_args
+    slog::emit("syscall", drakvuf, info,
+        slog::attr("ThreadName", slog::text(thread_name)),
+        slog::attr("Module", slog::text(std::move(info->trap->breakpoint.module))),
+        slog::attr("Syscall", slog::number((uint64_t)(params->num))),
+        slog::attr("NArgs", slog::number(params->sc->num_args)),
+        slog::attr("Type", slog::text(params->type)),
+        fmt_args
     );
+
+    g_free(thread_name);
 }
 
 event_response_t linux_syscalls::linux_ret_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
@@ -376,7 +374,7 @@ bool linux_syscalls::trap_syscall_table_entries(drakvuf_t drakvuf)
 }
 
 
-linux_syscalls::linux_syscalls(drakvuf_t drakvuf, const syscalls_config* config, output_format_t output) : syscalls_base(drakvuf, config, output)
+linux_syscalls::linux_syscalls(drakvuf_t drakvuf, const syscalls_config* config) : syscalls_base(drakvuf, config)
 {
     if (!drakvuf_get_kernel_struct_members_array_rva(drakvuf, linux_pt_regs_offsets_name, this->regs.size(), this->regs.data()))
     {

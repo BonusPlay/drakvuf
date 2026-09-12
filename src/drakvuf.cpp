@@ -245,7 +245,7 @@ drakvuf_c::drakvuf_c(const char* domain,
         throw std::runtime_error("drakvuf_init() failed");
     }
 
-    plugins = new drakvuf_plugins(drakvuf, output, drakvuf_get_os_type(drakvuf));
+    plugins = new drakvuf_plugins(drakvuf, drakvuf_get_os_type(drakvuf));
 }
 
 drakvuf_c::~drakvuf_c()

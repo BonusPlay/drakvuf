@@ -114,7 +114,7 @@ class win_procmon : public pluginex
 public:
     std::array<size_t, procmon_ns::__WINDOWS_OFFSET_MAX> offsets;
 
-    win_procmon(drakvuf_t drakvuf, output_format_t output);
+    win_procmon(drakvuf_t drakvuf);
     win_procmon(const win_procmon&) = delete;
     win_procmon& operator=(const win_procmon&) = delete;
 };

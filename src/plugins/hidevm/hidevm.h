@@ -122,7 +122,6 @@ public:
     event_response_t NtDeviceIoControlFile_cb(drakvuf_t, drakvuf_trap_info*);
 
     drakvuf_t drakvuf;
-    const output_format_t format;
 
     uint8_t stage = 0;
     uint8_t query_stage = 0;
@@ -157,7 +156,7 @@ public:
     wanted_hooks_t wanted_hooks;
     size_t* m_offsets;
 
-    hidevm(drakvuf_t drakvuf, const hidevm_config* config, output_format_t output);
+    hidevm(drakvuf_t drakvuf, const hidevm_config* config);
     ~hidevm() = default;
 
     virtual bool stop_impl() override;

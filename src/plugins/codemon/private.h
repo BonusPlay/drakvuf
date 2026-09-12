@@ -104,6 +104,8 @@
 
 #pragma once
 
+#include "plugins/helpers/unicode_string.h"
+
 /**
  * This struct contains all the metadata that is gathered through a page analysis
  */
@@ -118,7 +120,7 @@ struct dump_metadata_struct
     //THe checksum of the dumped memory
     const gchar* sha256sum;
     //The name of the dll
-    unicode_string_t* vad_name;
+    unicode_string vad_name;
     //the stem (basename without suffix) of the file
     char* file_stem;
     //The whole path of the dumpfile

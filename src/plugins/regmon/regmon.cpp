@@ -106,11 +106,10 @@
 #include <assert.h>
 #include <vector>
 #include <string>
-#include <sstream>
-#include <iomanip>
+#include <optional>
 
 #include "plugins/plugins.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 #include "plugins/plugin_utils.h"
 
 #include "regmon.h"
@@ -153,31 +152,23 @@ static const flags_str_t reg_options =
     REGISTER_FLAG(REG_OPTION_DONT_VIRTUALIZE)
 };
 
-void regmon::print_registry_call_info(drakvuf_t drakvuf, drakvuf_trap_info_t* info, char const* key_name, char const* value_name, char const* value, uint32_t reg_opts)
+void regmon::print_registry_call_info(drakvuf_t drakvuf, drakvuf_trap_info_t* info,
+    const slog::value& key_name, const std::optional<slog::value>& value_name,
+    const std::optional<slog::value>& value, uint32_t reg_opts)
 {
-    std::optional<fmt::Qstr<decltype(value_name)>> value_name_opt;
-    std::optional<fmt::Qstr<decltype(value)>> value_opt;
-    std::string flags;
 
-    if (value_name)
-        value_name_opt = fmt::Qstr(value_name);
-    if (value)
-        value_opt = fmt::Qstr(value);
-    if (reg_opts)
-        flags = parse_flags(reg_opts, reg_options, this->m_output_format);
-
-    fmt::print(this->m_output_format, "regmon", drakvuf, info,
-        keyval("Key", fmt::Qstr(key_name)),
-        keyval("ValueName", value_name_opt),
-        keyval("Value", value_opt),
-        flagsval("RegOptions", flags)
+    slog::emit("regmon", drakvuf, info,
+        slog::attr("Key", key_name),
+        slog::attr("ValueName", value_name),
+        slog::attr("Value", value),
+        slog::attr("RegOptions", slog::flags(reg_opts, reg_options))
     );
 }
 
 event_response_t regmon::log_reg_impl( drakvuf_t drakvuf, drakvuf_trap_info_t* info,
     uint64_t key_handle,
-    char const* value_name,
-    char const* data )
+    const std::optional<slog::value>& value_name,
+    const std::optional<slog::value>& data )
 {
     if (!key_handle) return 0;
 
@@ -191,41 +182,28 @@ event_response_t regmon::log_reg_impl( drakvuf_t drakvuf, drakvuf_trap_info_t* i
     return 0;
 }
 
-static char const* get_value_name(unicode_string_t* us)
-{
-    return (us && us->length > 0) ? reinterpret_cast<char const*>(us->contents) : "(Default)";
-}
-
 event_response_t regmon::log_reg_impl( drakvuf_t drakvuf, drakvuf_trap_info_t* info,
     uint64_t key_handle,
     addr_t value_name_addr, bool with_value_name,
-    char const* data )
+    const std::optional<slog::value>& data )
 {
-    unicode_string_t* value_name_us = nullptr;
-    char const* value_name = nullptr;
+    std::optional<slog::value> value_name;
     if (with_value_name)
-    {
-        value_name_us = drakvuf_read_unicode(drakvuf, info, value_name_addr);
-        value_name = get_value_name(value_name_us);
-    }
+        value_name = slog::value(unicode_string(drakvuf, info, value_name_addr));
 
-    auto status = log_reg_impl(drakvuf, info, key_handle, value_name, data);
-
-    if (value_name_us) vmi_free_unicode_str(value_name_us);
-
-    return status;
+    return log_reg_impl(drakvuf, info, key_handle, value_name, data);
 }
 
 event_response_t regmon::log_reg_key( drakvuf_t drakvuf, drakvuf_trap_info_t* info,
     uint64_t key_handle)
 {
-    return log_reg_impl(drakvuf, info, key_handle, 0L, false, nullptr);
+    return log_reg_impl(drakvuf, info, key_handle, 0L, false, {});
 }
 
 event_response_t regmon::log_reg_key_value( drakvuf_t drakvuf, drakvuf_trap_info_t* info,
     uint64_t key_handle, addr_t value_name_addr )
 {
-    return log_reg_impl(drakvuf, info, key_handle, value_name_addr, true, nullptr);
+    return log_reg_impl(drakvuf, info, key_handle, value_name_addr, true, {});
 }
 
 char* regmon::get_key_path_from_attr(drakvuf_t drakvuf, drakvuf_trap_info_t* info, addr_t attr)
@@ -272,14 +250,84 @@ event_response_t regmon::log_reg_objattr(drakvuf_t drakvuf, drakvuf_trap_info_t*
     char* key_path = get_key_path_from_attr(drakvuf, info, attr);
 
     if (key_path)
-        print_registry_call_info(drakvuf, info, key_path, nullptr, nullptr, reg_opts);
+        print_registry_call_info(drakvuf, info, key_path, {}, {}, reg_opts);
 
     g_free(key_path);
 
     return 0;
 }
 
-unicode_string_t* regmon::get_data_as_string( drakvuf_t drakvuf, drakvuf_trap_info_t* info,
+// Borrowed view over the guest bytes. slog decodes eagerly, so this need not
+// outlive the call.
+static slog::value utf16_value(uint8_t* data, size_t size)
+{
+    unicode_string_t view{size, data, "UTF-16LE"};
+    return slog::value(&view);
+}
+
+static size_t without_trailing_nuls(const uint8_t* data, size_t size)
+{
+    while (size >= sizeof(uint16_t) && !data[size - 1] && !data[size - 2])
+        size -= sizeof(uint16_t);
+    return size;
+}
+
+static slog::value parse_registry_data(uint32_t type, std::vector<uint8_t>& data)
+{
+    if (type == REG_SZ || type == REG_LINK || type == REG_EXPAND_SZ)
+    {
+        size_t size = data.size();
+        if (size % sizeof(uint16_t) == 0)
+            size = without_trailing_nuls(data.data(), size);
+        return utf16_value(data.data(), size);
+    }
+
+    if (type == REG_MULTI_SZ)
+    {
+        if (data.size() % sizeof(uint16_t))
+            return slog::value(std::vector<slog::value>{utf16_value(data.data(), data.size())});
+
+        // The array ends in an empty string; drop that terminator (and any NUL
+        // padding after it) so it does not come out as a trailing "".
+        const size_t end = without_trailing_nuls(data.data(), data.size());
+
+        std::vector<slog::value> strings;
+        size_t begin = 0;
+        for (size_t offset = 0; offset < end; offset += sizeof(uint16_t))
+        {
+            uint16_t code_unit = 0;
+            memcpy(&code_unit, data.data() + offset, sizeof(code_unit));
+            if (!code_unit)
+            {
+                strings.push_back(utf16_value(data.data() + begin, offset - begin));
+                begin = offset + sizeof(uint16_t);
+            }
+        }
+        if (begin < end)
+            strings.push_back(utf16_value(data.data() + begin, end - begin));
+        return slog::value(std::move(strings));
+    }
+
+    if ((type == REG_DWORD || type == REG_DWORD_BIG_ENDIAN) && data.size() == sizeof(uint32_t))
+    {
+        uint32_t value = 0;
+        memcpy(&value, data.data(), sizeof(value));
+        value = type == REG_DWORD_BIG_ENDIAN ? GUINT32_FROM_BE(value) : GUINT32_FROM_LE(value);
+        return slog::number(value);
+    }
+
+    if (type == REG_QWORD && data.size() == sizeof(uint64_t))
+    {
+        uint64_t value = 0;
+        memcpy(&value, data.data(), sizeof(value));
+        return slog::number(GUINT64_FROM_LE(value));
+    }
+
+    return slog::bytes(data.data(), data.size());
+}
+
+event_response_t regmon::log_reg_key_value_data( drakvuf_t drakvuf, drakvuf_trap_info_t* info,
+    uint64_t key_handle, addr_t value_name_addr,
     uint32_t type, addr_t data_addr, size_t data_size )
 {
     ACCESS_CONTEXT(ctx,
@@ -288,86 +336,22 @@ unicode_string_t* regmon::get_data_as_string( drakvuf_t drakvuf, drakvuf_trap_in
         .addr = data_addr
     );
 
-    auto vmi = vmi_lock_guard(drakvuf);
-
-    if ((type == REG_SZ) || (type == REG_LINK) || (type == REG_EXPAND_SZ))
-        return drakvuf_read_wchar_string(drakvuf, &ctx);
-
-    std::vector<uint8_t> data_bytes(data_size, 0);
-
+    std::vector<uint8_t> data(data_size);
     size_t bytes_read = 0;
-    if ( VMI_FAILURE == vmi_read(vmi, &ctx, data_size, data_bytes.data(), &bytes_read) )
     {
-        PRINT_DEBUG("[REGMON] Error reading data, expected %zu bytes, but actually read %zu\n", data_size, bytes_read);
-        return nullptr;
-    }
-
-    std::ostringstream rs;
-
-    if (type == REG_MULTI_SZ) // double-zero terminated Unicode strings array
-    {
-        ctx.addr = data_addr;
-        for (size_t i = 0 ; i < data_bytes.size() ; i += 2)
+        auto vmi = vmi_lock_guard(drakvuf);
+        if (!data.empty()
+            && (VMI_FAILURE == vmi_read(vmi, &ctx, data.size(), data.data(), &bytes_read)
+                || bytes_read != data.size()))
         {
-            uint16_t value_word;
-            memcpy(&value_word, &data_bytes[i], sizeof(value_word));
-
-            if (value_word == 0)
-            {
-                // Read current wchar string
-                unicode_string_t* us = drakvuf_read_wchar_string(drakvuf, &ctx);
-                if (us)
-                {
-                    rs << "'" << us->contents << "',";
-                    vmi_free_unicode_str(us);
-                }
-                ctx.addr = data_addr + i + 2;
-            }
-
-            if (data_bytes.size() - i >= 4)
-            {
-                uint32_t value_dword;
-                memcpy(&value_dword, &data_bytes[i], sizeof(value_dword));
-                if ((value_dword == 0) && ((i + 4) >= data_bytes.size()))
-                    break;
-            }
-        }
-    }
-    else
-    {
-        for (size_t i = 0; i < data_bytes.size(); ++i)
-        {
-            rs << std::setw(2) << std::setfill('0') << std::hex << static_cast<int>(data_bytes[i]) << ' ';
+            PRINT_DEBUG("[REGMON] Error reading data, expected %zu bytes, but actually read %zu\n",
+                data.size(), bytes_read);
+            return 0;
         }
     }
 
-    std::string result = rs.str();
-    if (!result.empty()) result.erase(result.size() - 1);
-
-    unicode_string_t* data_us = (unicode_string_t*)g_try_malloc0(sizeof(unicode_string_t));
-    data_us->encoding = "UTF-8";
-    data_us->contents = (uint8_t*)g_strdup(result.c_str());
-    data_us->length = result.size() + 1;
-
-    return data_us;
-}
-
-event_response_t regmon::log_reg_key_value_data( drakvuf_t drakvuf, drakvuf_trap_info_t* info,
-    uint64_t key_handle, addr_t value_name_addr,
-    uint32_t type, addr_t data_addr, size_t data_size )
-{
-    unicode_string_t* data_us = get_data_as_string(drakvuf, info, type, data_addr, data_size);
-
-    if ( !data_us )
-        return 0;
-
-    char const* data = (char const*)data_us->contents;
-    auto status = log_reg_impl( drakvuf, info, key_handle, value_name_addr, true, data );
-
-    free(data_us->contents);
-    free(data_us);
-
-    return status;
+    std::optional<slog::value> value = parse_registry_data(type, data);
+    return log_reg_impl(drakvuf, info, key_handle, value_name_addr, true, value);
 }
 
 event_response_t regmon::log_reg_key_value_entries( drakvuf_t drakvuf, drakvuf_trap_info_t* info,
@@ -385,7 +369,7 @@ event_response_t regmon::log_reg_key_value_entries( drakvuf_t drakvuf, drakvuf_t
     bool is32bit = (drakvuf_get_page_mode(drakvuf) != VMI_PM_IA32E);
     size_t KEY_VALUE_ENTRY_sizeof = drakvuf_get_address_width(drakvuf) + 3 * sizeof(uint32_t) + (is32bit ? 0 : 4 /*padding*/);
 
-    std::ostringstream ss;
+    std::vector<slog::value> value_names;
     for (size_t i = 0; i < value_entries_count; ++i)
     {
         auto vmi = vmi_lock_guard(drakvuf);
@@ -400,15 +384,11 @@ event_response_t regmon::log_reg_key_value_entries( drakvuf_t drakvuf, drakvuf_t
         if ( VMI_FAILURE == vmi_read_addr(vmi, &ctx, &value_name_addr) )
             continue;
 
-        unicode_string_t* value_name_us = drakvuf_read_unicode(drakvuf, info, value_name_addr);
-        char const* value_name = get_value_name(value_name_us);
-        ss << value_name << ",";
-        if (value_name_us) vmi_free_unicode_str(value_name_us);
+        value_names.push_back(unicode_string(drakvuf, info, value_name_addr));
     }
-    std::string value_names = ss.str();
-    if (!value_names.empty()) value_names.erase(value_names.size() - 1);
 
-    return log_reg_impl(drakvuf, info, key_handle, value_names.c_str(), nullptr);
+    std::optional<slog::value> names = slog::value(std::move(value_names));
+    return log_reg_impl(drakvuf, info, key_handle, names, {});
 }
 
 event_response_t regmon::delete_key_cb( drakvuf_t drakvuf, drakvuf_trap_info_t* info )
@@ -632,8 +612,8 @@ event_response_t regmon::query_value_key_cb( drakvuf_t drakvuf, drakvuf_trap_inf
     return log_reg_key_value( drakvuf, info, key_handle, value_name_addr );
 }
 
-regmon::regmon(drakvuf_t drakvuf, output_format_t output)
-    : pluginex(drakvuf, output)
+regmon::regmon(drakvuf_t drakvuf)
+    : pluginex(drakvuf)
 {
     if ( !drakvuf_get_kernel_struct_member_rva(drakvuf, "_OBJECT_ATTRIBUTES", "ObjectName", &this->objattr_name) )
         throw -1;

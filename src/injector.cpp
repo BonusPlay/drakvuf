@@ -111,6 +111,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
+#include <string.h>
 #include <unistd.h>
 #include <getopt.h>
 #include <sys/time.h>
@@ -191,6 +192,7 @@ static inline void print_help(void)
         "\t -V <shellexec verb>       Verb for ShellExecute (e.g. runas for elevation into Administrator rights)\n"
         "\t -I <injection thread>     The ThreadID in the process to hijack for injection (requires -i) (LINUX: Injects to TGID Thread if ThreadID not specified)\n"
         "\t -c <current_working_dir>  The current working directory for injected executable\n"
+        "\t -o <format>               Structured output format (kv or json; default: kv)\n"
         "\t -w                        Inject process and wait until it terminates (requires -m createproc)\n"
         "\t --timeout <seconds>\n"
         "\t                           Injection timeout (in seconds, default: 0 == no timeout)\n"
@@ -219,7 +221,7 @@ int main(int argc, char** argv)
     bool wait_for_exit = false;
     std::vector<const char*> args;
     addr_t kpgd = 0;
-    output_format_t output = OUTPUT_DEFAULT;
+    output_format_t output = OUTPUT_KV;
     vmi_pid_t injected_pid = 0;
     int timeout = 0;
 
@@ -312,12 +314,15 @@ int main(int argc, char** argv)
                 kpgd = strtoull(optarg, NULL, 0);
                 break;
             case 'o':
-                if (!strncmp(optarg, "csv", 3))
-                    output = OUTPUT_CSV;
-                if (!strncmp(optarg, "kv", 2))
+                if (!strcmp(optarg, "kv"))
                     output = OUTPUT_KV;
-                if (!strncmp(optarg, "json", 4))
+                else if (!strcmp(optarg, "json"))
                     output = OUTPUT_JSON;
+                else
+                {
+                    fprintf(stderr, "Unknown output format: %s (expected kv or json)\n", optarg);
+                    return drakvuf_exit_code_t::FAIL;
+                }
                 break;
             case 'w':
                 wait_for_exit = true;
@@ -369,9 +374,6 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    if (output == OUTPUT_DEFAULT)
-        printf("Injector starting %s through PID %u TID: %u\n", inject_file, injection_pid, injection_thread);
-
     startup_timer(timeout);
 
     injector_status_t injection_result = injector_start_app(
@@ -403,16 +405,10 @@ int main(int argc, char** argv)
     switch (injection_result)
     {
         case INJECTOR_SUCCEEDED:
-            if (output == OUTPUT_DEFAULT)
-                printf("Process startup success\n");
             return drakvuf_exit_code_t::SUCCESS;
         case INJECTOR_TIMEOUTED:
-            if (output == OUTPUT_DEFAULT)
-                printf("Process startup timeouted\n");
             return drakvuf_exit_code_t::INJECTION_TIMEOUT;
         default:
-            if (output == OUTPUT_DEFAULT)
-                printf("Process startup failed\n");
             return drakvuf_exit_code_t::FAIL;
     }
 }

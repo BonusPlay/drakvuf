@@ -115,9 +115,8 @@ struct windowmon_config
 class windowmon: public plugin
 {
 public:
-    const output_format_t format;
 
-    windowmon(drakvuf_t drakvuf, const windowmon_config* config, output_format_t output);
+    windowmon(drakvuf_t drakvuf, const windowmon_config* config);
 
 private:
     virtual bool stop_impl() override;

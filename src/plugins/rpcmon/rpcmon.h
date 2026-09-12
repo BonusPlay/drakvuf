@@ -117,7 +117,7 @@ class rpcmon: public pluginex
 public:
     wanted_hooks_t wanted_hooks;
 
-    rpcmon(drakvuf_t drakvuf, output_format_t output);
+    rpcmon(drakvuf_t drakvuf);
     ~rpcmon();
 
     virtual bool stop_impl() override;

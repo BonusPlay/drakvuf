@@ -119,6 +119,6 @@ class rebootmon : public pluginex
 public:
     std::unique_ptr<linux_rebootmon> l_impl;
 
-    rebootmon(drakvuf_t drakvuf, const rebootmon_config* c, output_format_t output);
+    rebootmon(drakvuf_t drakvuf, const rebootmon_config* c);
     ~rebootmon() = default;
 };

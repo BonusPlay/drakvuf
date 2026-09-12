@@ -154,7 +154,7 @@ struct ipt_vcpu
 class ipt: public pluginex
 {
 public:
-    ipt(drakvuf_t drakvuf, const ipt_config& config, output_format_t output);
+    ipt(drakvuf_t drakvuf, const ipt_config& config);
     ~ipt();
 
     event_response_t cr3_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info);

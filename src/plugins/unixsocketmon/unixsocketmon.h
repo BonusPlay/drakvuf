@@ -125,7 +125,7 @@ public:
 
     std::unique_ptr<libhook::SyscallHook> sockethook;
 
-    unixsocketmon(drakvuf_t drakvuf, const unixsocketmon_config* config, output_format_t output);
+    unixsocketmon(drakvuf_t drakvuf, const unixsocketmon_config* config);
     event_response_t sock_send_msg_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info);
     std::vector<uint8_t> get_socket_message(drakvuf_t drakvuf, drakvuf_trap_info_t* info, uint64_t* size);
     bool get_socket_family_type(drakvuf_t drakvuf, drakvuf_trap_info_t* info, uint32_t* family_type);

@@ -109,11 +109,11 @@
 #include "linux.h"
 #include "win.h"
 
-filetracer::filetracer(drakvuf_t drakvuf, const filetracer_config* config, output_format_t output) : pluginex(drakvuf, output)
+filetracer::filetracer(drakvuf_t drakvuf, const filetracer_config* config) : pluginex(drakvuf)
 {
     auto os = drakvuf_get_os_type(drakvuf);
     if (os == VMI_OS_WINDOWS)
-        this->wf = std::make_unique<win_filetracer>(drakvuf, config, output);
+        this->wf = std::make_unique<win_filetracer>(drakvuf, config);
     else
-        this->lf = std::make_unique<linux_filetracer>(drakvuf, output);
+        this->lf = std::make_unique<linux_filetracer>(drakvuf);
 }

@@ -462,7 +462,7 @@ public:
     typedef event_response_t(*hook_cb_t)(drakvuf_t drakvuf, drakvuf_trap_info_t* info);
     typedef void(*ah_cb_t)(drakvuf_t drakvuf, drakvuf_trap_t* trap);
 
-    pluginex(drakvuf_t drakvuf, output_format_t output);
+    explicit pluginex(drakvuf_t drakvuf);
     virtual ~pluginex();
     virtual bool stop_impl() override;
     void destroy_all_traps();
@@ -530,7 +530,6 @@ public:
 
     void destroy_trap(drakvuf_trap_t* target);
 
-    const output_format_t m_output_format;
     drakvuf_t drakvuf;
 
 private:

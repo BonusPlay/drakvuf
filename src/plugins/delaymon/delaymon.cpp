@@ -103,7 +103,7 @@
  ***************************************************************************/
 
 #include "delaymon.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 
 #include <cmath>
 
@@ -111,8 +111,6 @@
 
 static event_response_t trap_NtDelayExecution_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
 {
-    delaymon* sm = (delaymon*)info->trap->data;
-
     addr_t delay_addr = drakvuf_get_function_argument(drakvuf, info, 2);
     int64_t delay = 0; // in hundreds of nanoseconds
 
@@ -131,12 +129,10 @@ static event_response_t trap_NtDelayExecution_cb(drakvuf_t drakvuf, drakvuf_trap
         }
     }
 
-    auto delay_interval_miliseconds = fmt::Fval(delay / 10000.0); // delay in miliseconds
+    auto delay_interval_miliseconds = slog::number(delay / 10000.0); // delay in miliseconds
 
-    fmt::print(sm->format, "delaymon", drakvuf, info,
-        keyval("VCPU", fmt::Nval(info->vcpu)),
-        keyval("CR3", fmt::Nval(info->regs->cr3)),
-        keyval("DelayIntervalMs", delay_interval_miliseconds)
+    slog::emit("delaymon", drakvuf, info,
+        slog::attr("DelayIntervalMs", delay_interval_miliseconds)
     );
 
     return 0;
@@ -155,8 +151,8 @@ static void register_trap( drakvuf_t drakvuf, const char* syscall_name,
     if ( ! drakvuf_add_trap( drakvuf, trap ) ) throw -1;
 }
 
-delaymon::delaymon(drakvuf_t drakvuf, output_format_t output)
-    : drakvuf{drakvuf}, format{output}
+delaymon::delaymon(drakvuf_t drakvuf)
+    : drakvuf{drakvuf}
 {
     register_trap(drakvuf, "NtDelayExecution", &trap, trap_NtDelayExecution_cb);
 }

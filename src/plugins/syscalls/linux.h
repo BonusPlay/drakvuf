@@ -128,7 +128,7 @@ public:
 
     bool trap_syscall_table_entries(drakvuf_t drakvuf);
 
-    linux_syscalls(drakvuf_t drakvuf, const syscalls_config* config, output_format_t output);
+    linux_syscalls(drakvuf_t drakvuf, const syscalls_config* config);
 };
 namespace syscalls_ns
 {

@@ -102,7 +102,6 @@
  *                                                                         *
  ***************************************************************************/
 
-#include <iomanip>
 #include <map>
 #include <memory>
 #include <sstream>
@@ -110,10 +109,6 @@
 #include "private.h"
 #include "win_acl.h"
 
-using std::hex;
-using std::showbase;
-using std::setfill;
-using std::setw;
 using std::string;
 using std::stringstream;
 using namespace filetracer_ns;
@@ -151,7 +146,7 @@ enum
             case ACE##_TYPE: {\
                 auto ace = reinterpret_cast<const struct ACE*>(header); \
                 type = #ACE "_TYPE"; \
-                mask = parse_flags(ace->Mask, generic_ar, format); \
+                mask = slog::flags(ace->Mask, generic_ar); \
                 auto bytes_left = aces.get() + aces_size - ace_ptr - offsetof(struct ACE, SidStart); \
                 sid = parse_sid(ace_ptr + offsetof(struct ACE, SidStart), bytes_left); \
                 break; }\
@@ -509,22 +504,22 @@ std::string read_sid(vmi_instance_t vmi, access_context_t* ctx, size_t* offsets)
     return parse_sid(buffer.get(), sid_size);
 }
 
-string read_acl(vmi_instance_t vmi, access_context_t* ctx, size_t* offsets, string base_name, output_format_t format)
+std::vector<acl_entry_t> read_acl(vmi_instance_t vmi, access_context_t* ctx, size_t* offsets)
 {
-    stringstream fmt;
+    std::vector<acl_entry_t> result;
 
     const addr_t pacl = ctx->addr;
 
     size_t ace_count = 0;
     ctx->addr = pacl + offsets[_ACL_AceCount];
     if ( VMI_SUCCESS != vmi_read_8(vmi, ctx, reinterpret_cast<uint8_t*>(&ace_count)) || 0 == ace_count)
-        return std::string();
+        return {};
 
     const size_t ACL_SIZE = 8;
     uint8_t acl_size = 0;
     ctx->addr = pacl + offsets[_ACL_AclSize];
     if ( VMI_SUCCESS != vmi_read_8(vmi, ctx, &acl_size) || ACL_SIZE >= acl_size )
-        return std::string();
+        return {};
 
     const uint8_t aces_size = acl_size - ACL_SIZE;
     std::unique_ptr<uint8_t[]> aces(new uint8_t[aces_size] {0});
@@ -533,29 +528,7 @@ string read_acl(vmi_instance_t vmi, access_context_t* ctx, size_t* offsets, stri
     size_t bytes_read = 0;
     if ( VMI_SUCCESS != vmi_read(vmi, ctx, aces_size, ace_ptr, &bytes_read) ||
         aces_size != bytes_read)
-        return string();
-
-    // manual work done, may arise issues
-    switch (format)
-    {
-        case OUTPUT_CSV:
-            fmt << '"';
-            break;
-
-        case OUTPUT_KV:
-            fmt << base_name << '=' << ace_count;
-            break;
-
-        case OUTPUT_JSON:
-            fmt << '"' << base_name << "\": [";
-            break;
-
-        default:
-        case OUTPUT_DEFAULT:
-            for (auto& c: base_name) c = std::toupper(c);
-            fmt << base_name << "_COUNT:" << ace_count;
-            break;
-    }
+        return {};
 
     size_t aces_read = 0;
     while (ace_ptr < aces.get() + aces_size && aces_read < ace_count)
@@ -563,7 +536,7 @@ string read_acl(vmi_instance_t vmi, access_context_t* ctx, size_t* offsets, stri
         auto header = reinterpret_cast<const struct ACE_HEADER*>(ace_ptr);
         auto ace_size = static_cast<size_t>(header->size);
         string type;
-        string mask;
+        slog::value mask;
         string sid;
 
         switch (header->type)
@@ -594,33 +567,11 @@ string read_acl(vmi_instance_t vmi, access_context_t* ctx, size_t* offsets, stri
                 break;
         }
 
-        // manual work done, may arise issues
-        switch (format)
-        {
-            case OUTPUT_CSV:
-                if (ace_ptr != aces.get())
-                    fmt << ',';
-                fmt << type << ',' << hex << showbase << mask << ',' << sid;
-                break;
-
-            case OUTPUT_KV:
-                fmt << ",Type=\"" << type << "\"";
-                if (!mask.empty())
-                    fmt << "," << hex << showbase << mask;
-                fmt << ",SID=\"" << sid << '"';
-                break;
-
-            case OUTPUT_JSON:
-                if (ace_ptr != aces.get())
-                    fmt << ',';
-                fmt << "{\"Type\" : \"" << type << "\",\"AccessMask\" : \"" << hex << showbase << mask << "\",\"SID\" : \"" << sid << "\"}";
-                break;
-
-            default:
-            case OUTPUT_DEFAULT:
-                fmt << ",TYPE:" << type << ",ACCESS_MASK:\"" << hex << showbase << mask << "\",SID:" << sid;;
-                break;
-        }
+        result.push_back({
+            std::move(type),
+            std::move(mask),
+            std::move(sid),
+        });
 
         if (0 == ace_size || ace_ptr + ace_size < ace_ptr)
         {
@@ -632,22 +583,5 @@ string read_acl(vmi_instance_t vmi, access_context_t* ctx, size_t* offsets, stri
         aces_read += 1;
     }
 
-    // manual work done, may arise issues
-    switch (format)
-    {
-        case OUTPUT_CSV:
-            fmt << '"';
-            break;
-
-        case OUTPUT_JSON:
-            fmt << ']';
-            break;
-
-        default:
-        case OUTPUT_KV:
-        case OUTPUT_DEFAULT:
-            break;
-    }
-
-    return fmt.str();
+    return result;
 }

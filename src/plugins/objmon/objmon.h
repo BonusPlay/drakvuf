@@ -116,10 +116,9 @@ struct objmon_config
 class objmon: public pluginex
 {
 public:
-    output_format_t format;
     addr_t key_offset;
 
-    objmon(drakvuf_t drakvuf, const objmon_config* config, output_format_t output);
+    objmon(drakvuf_t drakvuf, const objmon_config* config);
     ~objmon();
 };
 

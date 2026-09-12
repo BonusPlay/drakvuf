@@ -101,13 +101,217 @@
  * https://github.com/tklengyel/drakvuf/COPYING)                           *
  *                                                                         *
  ***************************************************************************/
+#pragma once
+#include <libdrakvuf/libdrakvuf.h>
 
-#ifndef LIBUSERMODE_PRINTERS_UTILS_H
-#define LIBUSERMODE_PRINTERS_UTILS_H
-
-
+#include <cstddef>
+#include <cstdint>
+#include <filesystem>
+#include <iterator>
+#include <map>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <type_traits>
+#include <utility>
+#include <variant>
+#include <vector>
 
-std::string escape_str(const std::string& s);
+namespace slog
+{
 
-#endif
+inline constexpr std::monostate null{};
+
+// Tags an integer for hex rendering; without it a hex field is indistinguishable
+// from a plain number.
+struct hex_value { uint64_t data; };
+
+struct keyval;
+using keyval_array = std::vector<keyval>;
+
+struct value
+{
+    using storage = std::variant<
+        std::monostate, bool, int64_t, uint64_t, double,
+        std::string, std::vector<uint8_t>, hex_value,
+        std::vector<value>, keyval_array>;
+
+    storage data;
+
+    value() = default;
+    value(std::monostate) {}
+    value(std::nullptr_t) {}
+
+    template<typename T,
+        std::enable_if_t<std::is_arithmetic_v<T> || std::is_enum_v<T>, int> = 0>
+    value(T input);
+
+    value(const char* input) : data{input ? storage{std::string(input)} : storage{}} {}
+    value(std::string input) : data{std::move(input)} {}
+    value(std::string_view input) : data{std::string(input)} {}
+    value(std::vector<uint8_t> input) : data{std::move(input)} {}
+    value(hex_value input) : data{input} {}
+    value(const unicode_string_t* input);
+    value(std::vector<value> input) : data{std::move(input)} {}
+    value(keyval_array input) : data{std::move(input)} {}
+
+    template<typename T>
+    value(const std::optional<T>& input);
+
+    // Strings are scalar text; any other range becomes a group when its elements
+    // look like key/value pairs, an array otherwise.
+    template<typename Range,
+        typename = std::enable_if_t<!std::is_convertible_v<const Range&, std::string_view>>,
+        typename = decltype(std::begin(std::declval<const Range&>()),
+            std::end(std::declval<const Range&>()))>
+    value(const Range& items);
+};
+
+struct keyval
+{
+    std::string key;
+    value data;
+
+    keyval(std::string name, value input)
+        : key(std::move(name)), data(std::move(input))
+    {}
+
+    // allows std::map<std::string, T> convert
+    template<typename K, typename V>
+    keyval(const std::pair<K, V>& input)
+        : keyval(std::string(input.first), value(input.second))
+    {}
+};
+
+template<typename T,
+    std::enable_if_t<std::is_arithmetic_v<T> || std::is_enum_v<T>, int>>
+inline value::value(T input)
+{
+    if constexpr (std::is_enum_v<T>)
+        data = value(static_cast<std::underlying_type_t<T>>(input)).data;
+    else if constexpr (std::is_same_v<T, bool>)
+        data = input;
+    else if constexpr (std::is_floating_point_v<T>)
+        data = static_cast<double>(input);
+    else if constexpr (std::is_signed_v<T>)
+        data = static_cast<int64_t>(input);
+    else
+        data = static_cast<uint64_t>(input);
+}
+
+template<typename T>
+inline value::value(const std::optional<T>& input) : value(input ? value(*input) : value()) {}
+
+template<typename Range, typename, typename>
+value::value(const Range& items)
+{
+    if constexpr (std::is_constructible_v<keyval, decltype(*std::begin(items))>)
+    {
+        keyval_array result;
+        for (const auto& item : items)
+            result.push_back(keyval(item));
+        data = std::move(result);
+    }
+    else
+    {
+        std::vector<value> result;
+        for (const auto& item : items)
+            result.emplace_back(item);
+        data = std::move(result);
+    }
+}
+
+value text(const char* data);
+value text(std::nullptr_t);
+value text(std::string data);
+value text(std::string_view data);
+
+template<typename T>
+value text(const std::optional<T>& data)
+{
+    return data ? text(*data) : value{};
+}
+
+value bytes(const void* data, size_t size);
+value bytes(std::string_view data);
+
+using flags_map = std::map<uint64_t, std::string>;
+
+// {"Value":"0x40042","Names":["FO_SYNCHRONOUS_IO",...]}
+value flags(uint64_t value, const flags_map& names);
+
+// Decoded UTF-8; bytes that will not decode are escaped. Never invalid UTF-8.
+std::string escaped_text(const unicode_string_t* data);
+
+value time(gint64 data);
+
+template<typename T>
+value number(T data)
+{
+    return value(data);
+}
+
+template<typename T>
+value hex(T data)
+{
+    static_assert((std::is_integral_v<T> && !std::is_same_v<T, bool>) || std::is_enum_v<T>,
+        "slog::hex requires an integral or enum value");
+    if constexpr (std::is_enum_v<T>)
+        return hex(static_cast<std::underlying_type_t<T>>(data));
+    else
+        return hex_value{static_cast<uint64_t>(static_cast<std::make_unsigned_t<T>>(data))};
+}
+
+template<typename T>
+value hex(const std::optional<T>& data)
+{
+    return data ? hex(*data) : value{};
+}
+
+template<typename T>
+keyval attr(std::string_view key, T&& data)
+{
+    return keyval{std::string(key), std::forward<T>(data)};
+}
+
+inline void append(keyval_array& target, keyval data)
+{
+    target.push_back(std::move(data));
+}
+
+inline void append(keyval_array& target, keyval_array data)
+{
+    target.insert(target.end(), std::make_move_iterator(data.begin()),
+        std::make_move_iterator(data.end()));
+}
+
+// setup only; log callers do not select or pass a format.
+void set_default_json() noexcept;
+void set_default_kv() noexcept;
+
+void emit_record(const keyval_array& data) noexcept;
+void emit_trap_record(const char* plugin, drakvuf_t drakvuf, const drakvuf_trap_info_t* info, keyval_array data) noexcept;
+void emit_process_record(const char* plugin, gint64 timestamp, const proc_data_t& process, keyval_array data) noexcept;
+
+// write record to a file
+bool write_record(const std::filesystem::path& path, const keyval_array& data) noexcept;
+
+template<typename... Args>
+void emit(const char* plugin, drakvuf_t drakvuf, const drakvuf_trap_info_t* info, Args&&... args) noexcept
+{
+    keyval_array data;
+    (append(data, std::forward<Args>(args)), ...);
+    emit_trap_record(plugin, drakvuf, info, std::move(data));
+}
+
+template<typename... Args>
+void emit_proc_data(const char* plugin, const proc_data_t& process, Args&&... args) noexcept
+{
+    keyval_array data;
+    (append(data, std::forward<Args>(args)), ...);
+    emit_process_record(plugin, g_get_real_time(), process, std::move(data));
+}
+
+void emit_running_process(const char* plugin, gint64 timestamp, const proc_data_t& process) noexcept;
+
+} // namespace slog

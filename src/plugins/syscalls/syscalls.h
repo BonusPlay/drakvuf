@@ -106,7 +106,7 @@
 #define SYSCALLS_H
 
 #include "plugins/plugins_ex.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 
 #include "linux.h"
 #include "win.h"
@@ -118,7 +118,7 @@ public:
     std::unique_ptr<linux_syscalls> _linux_syscalls;
     std::unique_ptr<win_syscalls> _win_syscalls;
 
-    syscalls(drakvuf_t drakvuf, const syscalls_config* config, output_format_t output);
+    syscalls(drakvuf_t drakvuf, const syscalls_config* config);
     syscalls(const syscalls&) = delete;
     syscalls& operator=(const syscalls&) = delete;
 };

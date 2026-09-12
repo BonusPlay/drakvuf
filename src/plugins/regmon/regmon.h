@@ -106,6 +106,7 @@
 #define REGMON_H
 
 #include "plugins/plugins_ex.h"
+#include "slog/slog.hpp"
 
 class regmon: public pluginex
 {
@@ -146,9 +147,9 @@ public:
     event_response_t query_value_key_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info);
 
     /* Helper functions */
-    void print_registry_call_info(drakvuf_t drakvuf, drakvuf_trap_info_t* info, char const* key_name, char const* value_name, char const* value, uint32_t reg_opts);
-    event_response_t log_reg_impl(drakvuf_t drakvuf, drakvuf_trap_info_t* info, uint64_t key_handle, char const* value_name, char const* data);
-    event_response_t log_reg_impl(drakvuf_t drakvuf, drakvuf_trap_info_t* info, uint64_t key_handle, addr_t value_name_addr, bool with_value_name, char const* data);
+    void print_registry_call_info(drakvuf_t drakvuf, drakvuf_trap_info_t* info, const slog::value& key_name, const std::optional<slog::value>& value_name, const std::optional<slog::value>& value, uint32_t reg_opts);
+    event_response_t log_reg_impl(drakvuf_t drakvuf, drakvuf_trap_info_t* info, uint64_t key_handle, const std::optional<slog::value>& value_name, const std::optional<slog::value>& data);
+    event_response_t log_reg_impl(drakvuf_t drakvuf, drakvuf_trap_info_t* info, uint64_t key_handle, addr_t value_name_addr, bool with_value_name, const std::optional<slog::value>& data);
     event_response_t log_reg_key(drakvuf_t drakvuf, drakvuf_trap_info_t* info, uint64_t key_handle);
     event_response_t log_reg_key_value(drakvuf_t drakvuf, drakvuf_trap_info_t* info, uint64_t key_handle, addr_t value_name_addr);
     event_response_t log_reg_objattr(drakvuf_t drakvuf, drakvuf_trap_info_t* info, addr_t attr, uint32_t reg_opts);
@@ -157,9 +158,7 @@ public:
 
     /* Registry info parsing */
     char* get_key_path_from_attr(drakvuf_t drakvuf, drakvuf_trap_info_t* info, addr_t attr);
-    unicode_string_t* get_data_as_string( drakvuf_t drakvuf, drakvuf_trap_info_t* info, uint32_t type, addr_t data_addr, size_t data_size);
-
-    regmon(drakvuf_t drakvuf, output_format_t output);
+    regmon(drakvuf_t drakvuf);
     ~regmon() = default;
 };
 

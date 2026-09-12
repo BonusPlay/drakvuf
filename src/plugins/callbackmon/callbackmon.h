@@ -119,14 +119,13 @@ using protocol_cb_t = std::unordered_map<addr_t, std::vector<api_bind_t>>;
 class callbackmon : public pluginex
 {
 public:
-    callbackmon(drakvuf_t drakvuf, const callbackmon_config* config, output_format_t output);
+    callbackmon(drakvuf_t drakvuf, const callbackmon_config* config);
 
-    void report(drakvuf_t drakvuf, const char* list_name, addr_t addr, const char* action);
+    void report(drakvuf_t drakvuf, const slog::value& list_name, addr_t addr, const char* action);
 
     event_response_t load_unload_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info);
 
     const callbackmon_config config;
-    const output_format_t format;
 
     std::array<size_t, callbackmon_ns::__OFFSET_MAX> offsets;
     std::array<size_t, callbackmon_ns::__OFFSET_OPEN_MAX> open_offsets;

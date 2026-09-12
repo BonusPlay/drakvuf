@@ -115,7 +115,7 @@ class fileextractor : public pluginex
 public:
     std::unique_ptr<win_fileextractor> wf;
 
-    fileextractor(drakvuf_t drakvuf, const fileextractor_config* config, output_format_t output);
+    fileextractor(drakvuf_t drakvuf, const fileextractor_config* config);
     ~fileextractor() = default;
 
     virtual bool stop_impl() override;

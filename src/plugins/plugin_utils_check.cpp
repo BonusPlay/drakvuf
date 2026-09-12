@@ -104,7 +104,12 @@
 
 #include <check.h>
 
+#include <string>
+#include <variant>
+#include <vector>
+
 #include "plugin_utils.h"
+#include "slog/slog.hpp"
 
 enum
 {
@@ -120,30 +125,71 @@ static const flags_str_t flags_and_attrs =
     REGISTER_FLAG(ATTRIBUTE_3),
 };
 
-START_TEST(test_parse_one_flag)
+static uint64_t flags_value(const slog::value& field)
 {
-    ck_assert(parse_flags(ATTRIBUTE_1, flags_and_attrs, OUTPUT_KV) == std::string("ATTRIBUTE_1=1"));
-    ck_assert(parse_flags(ATTRIBUTE_2, flags_and_attrs, OUTPUT_KV) == std::string("ATTRIBUTE_2=1"));
-    ck_assert(parse_flags(ATTRIBUTE_3, flags_and_attrs, OUTPUT_KV) == std::string("ATTRIBUTE_3=1"));
+    const auto& group = std::get<slog::keyval_array>(field.data);
+    ck_assert(group.size() == 2);
+    ck_assert(group[0].key == std::string("Value"));
+    return std::get<slog::hex_value>(group[0].data.data).data;
+}
+
+static std::vector<std::string> flags_names(const slog::value& field)
+{
+    const auto& group = std::get<slog::keyval_array>(field.data);
+    ck_assert(group.size() == 2);
+    ck_assert(group[1].key == std::string("Names"));
+
+    std::vector<std::string> names;
+    for (const auto& name : std::get<std::vector<slog::value>>(group[1].data.data))
+        names.push_back(std::get<std::string>(name.data));
+    return names;
+}
+
+START_TEST(test_flags_one)
+{
+    auto field = slog::flags(ATTRIBUTE_1, flags_and_attrs);
+    ck_assert(flags_value(field) == ATTRIBUTE_1);
+    ck_assert(flags_names(field) == (std::vector<std::string>{"ATTRIBUTE_1"}));
 }
 END_TEST
 
-START_TEST(test_parse_two_flags)
+START_TEST(test_flags_two)
 {
-    ck_assert(parse_flags(ATTRIBUTE_1 | ATTRIBUTE_2, flags_and_attrs, OUTPUT_KV) == std::string("ATTRIBUTE_1=1,ATTRIBUTE_2=1"));
+    auto field = slog::flags(ATTRIBUTE_1 | ATTRIBUTE_2, flags_and_attrs);
+    ck_assert(flags_value(field) == (ATTRIBUTE_1 | ATTRIBUTE_2));
+    ck_assert(flags_names(field) == (std::vector<std::string>{"ATTRIBUTE_1", "ATTRIBUTE_2"}));
 }
 END_TEST
 
-START_TEST(test_parse_three_flags)
+START_TEST(test_flags_three)
 {
-    ck_assert(parse_flags(ATTRIBUTE_1 | ATTRIBUTE_2 | ATTRIBUTE_3, flags_and_attrs, OUTPUT_KV) == std::string("ATTRIBUTE_1=1,ATTRIBUTE_2=1,ATTRIBUTE_3=1"));
+    auto field = slog::flags(ATTRIBUTE_1 | ATTRIBUTE_2 | ATTRIBUTE_3, flags_and_attrs);
+    ck_assert(flags_value(field) == (ATTRIBUTE_1 | ATTRIBUTE_2 | ATTRIBUTE_3));
+    ck_assert(flags_names(field)
+        == (std::vector<std::string>{"ATTRIBUTE_1", "ATTRIBUTE_2", "ATTRIBUTE_3"}));
 }
 END_TEST
 
-START_TEST(test_parse_64bit_flags)
+START_TEST(test_flags_64bit)
 {
+    // The unmapped high bits have no name but must survive in Value.
     uint64_t flags = 0xffffffff00000000 | ATTRIBUTE_1 | ATTRIBUTE_2 | ATTRIBUTE_3;
-    ck_assert(parse_flags(flags, flags_and_attrs, OUTPUT_KV) == std::string("ATTRIBUTE_1=1,ATTRIBUTE_2=1,ATTRIBUTE_3=1"));
+    auto field = slog::flags(flags, flags_and_attrs);
+    ck_assert(flags_value(field) == flags);
+    ck_assert(flags_names(field)
+        == (std::vector<std::string>{"ATTRIBUTE_1", "ATTRIBUTE_2", "ATTRIBUTE_3"}));
+}
+END_TEST
+
+START_TEST(test_flags_none_known)
+{
+    auto unknown = slog::flags(0x8000000000000000, flags_and_attrs);
+    ck_assert(flags_value(unknown) == 0x8000000000000000);
+    ck_assert(flags_names(unknown).empty());
+
+    auto none = slog::flags(0, flags_and_attrs);
+    ck_assert(flags_value(none) == 0);
+    ck_assert(flags_names(none).empty());
 }
 END_TEST
 
@@ -162,20 +208,21 @@ START_TEST(test_parse_unknown_enum_value)
 }
 END_TEST
 
-static Suite* parse_flags_suite(void)
+static Suite* flags_suite(void)
 {
     Suite* s;
     TCase* tc_core;
 
-    s = suite_create("Stringify bit flags");
+    s = suite_create("Bit flags as a log field");
 
     /* Core test case */
     tc_core = tcase_create("Core");
 
-    tcase_add_test(tc_core, test_parse_one_flag);
-    tcase_add_test(tc_core, test_parse_two_flags);
-    tcase_add_test(tc_core, test_parse_three_flags);
-    tcase_add_test(tc_core, test_parse_64bit_flags);
+    tcase_add_test(tc_core, test_flags_one);
+    tcase_add_test(tc_core, test_flags_two);
+    tcase_add_test(tc_core, test_flags_three);
+    tcase_add_test(tc_core, test_flags_64bit);
+    tcase_add_test(tc_core, test_flags_none_known);
     suite_add_tcase(s, tc_core);
 
     return s;
@@ -188,7 +235,6 @@ static Suite* parse_enum_suite(void)
 
     s = suite_create("Stringify enum values");
 
-    /* Core test case */
     tc_core = tcase_create("Core");
 
     tcase_add_test(tc_core, test_parse_known_enum_value);
@@ -204,7 +250,7 @@ int main(void)
     Suite* s;
     SRunner* sr;
 
-    s = parse_flags_suite();
+    s = flags_suite();
     sr = srunner_create(s);
     srunner_add_suite(sr, parse_enum_suite());
 

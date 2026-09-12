@@ -107,7 +107,7 @@
 #include <libdrakvuf/libdrakvuf.h>
 #include <libvmi/libvmi.h>
 #include "librarymon.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 
 
 static event_response_t load_library_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
@@ -118,28 +118,14 @@ static event_response_t load_library_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* 
 
     auto mon = get_trap_plugin<librarymon>(info);
 
-    unicode_string_t path { 0, 0, 0 };
-    unicode_string_t name { 0, 0, 0 };
-    unicode_string_t* tmp = nullptr;
-
-    if ((tmp = drakvuf_read_unicode(drakvuf, info, drakvuf_get_function_argument(drakvuf, info, 1))))
-        vmi_convert_str_encoding(tmp, &path, "UTF-8");
-
-    vmi_free_unicode_str(tmp);
-
-    if ((tmp = drakvuf_read_unicode(drakvuf, info, drakvuf_get_function_argument(drakvuf, info, 3))))
-        vmi_convert_str_encoding(tmp, &name, "UTF-8");
-
-    vmi_free_unicode_str(tmp);
+    unicode_string path(drakvuf, info, drakvuf_get_function_argument(drakvuf, info, 1));
+    unicode_string name(drakvuf, info, drakvuf_get_function_argument(drakvuf, info, 3));
     mon->print_call_info(drakvuf, info, name, path);
-
-    g_free(name.contents);
-    g_free(path.contents);
     return VMI_EVENT_RESPONSE_NONE;
 }
 
-librarymon::librarymon(drakvuf_t drakvuf, const librarymon_config* c, output_format_t output)
-    : pluginex(drakvuf, output)
+librarymon::librarymon(drakvuf_t drakvuf, const librarymon_config* c)
+    : pluginex(drakvuf)
 {
     if (!c->ntdll_profile)
     {
@@ -168,22 +154,11 @@ librarymon::librarymon(drakvuf_t drakvuf, const librarymon_config* c, output_for
     json_object_put(ntdll_profile);
 }
 
-void librarymon::print_call_info(drakvuf_t drakvuf, drakvuf_trap_info_t* info, const unicode_string_t& name, const unicode_string_t& path)
+void librarymon::print_call_info(drakvuf_t drakvuf, drakvuf_trap_info_t* info, const unicode_string& name, const unicode_string& path)
 {
-    const char* cname = reinterpret_cast<const char*>(name.contents) ?: "";
-    const char* cpath = reinterpret_cast<const char*>(path.contents) ?: "";
-
-    if (m_output_format == OUTPUT_DEFAULT)
-    {
-        deffmt::print("librarymon", drakvuf, info,
-            keyval("EPROCESS", fmt::Xval(info->proc_data.base_addr)),
-            keyval("MODULE_NAME", fmt::Qstr(cname)),
-            keyval("MODULE_PATH", fmt::Qstr(cpath))
-        );
-        return;
-    }
-    fmt::print(m_output_format, "librarymon", drakvuf, info,
-        keyval("ModuleName", fmt::Qstr(cname)),
-        keyval("ModulePath", fmt::Qstr(cpath))
+    slog::emit("librarymon", drakvuf, info,
+        slog::attr("EPROCESS", slog::hex(info->proc_data.base_addr)),
+        slog::attr("ModuleName", name),
+        slog::attr("ModulePath", path)
     );
 }

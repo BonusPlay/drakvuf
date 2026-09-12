@@ -121,12 +121,11 @@ public:
         .data = (void*)this,
         .ah_cb = nullptr
     };
-    output_format_t format;
     page_mode_t pm;
     size_t* offsets;
     size_t ktrap_frame_size;
 
-    exmon(drakvuf_t drakvuf, output_format_t output);
+    exmon(drakvuf_t drakvuf);
     ~exmon();
     virtual bool stop_impl() override;
 };

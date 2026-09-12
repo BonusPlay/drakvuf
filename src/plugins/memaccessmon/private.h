@@ -113,5 +113,5 @@ struct mmvad_context
     addr_t process;
     vmi_pid_t pid;
     std::optional<std::string> process_name;
-    std::optional<std::string> filename;
+    unicode_string filename;
 };

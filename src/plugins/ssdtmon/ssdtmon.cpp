@@ -117,7 +117,7 @@
 
 #include "plugins/plugins.h"
 #include "plugins/plugins_ex.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 
 #include "private.h"
 #include "ssdtmon.h"
@@ -179,9 +179,9 @@ event_response_t write_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
     if ( info->trap_pa > s->kiservicetable - 8 && info->trap_pa <= s->kiservicetable + sizeof(uint32_t) * s->kiservicelimit + sizeof(uint32_t) - 1 )
     {
         int64_t table_index = (info->trap_pa - s->kiservicetable) / sizeof(uint32_t);
-        fmt::print(s->format, "ssdtmon", drakvuf, info,
-            keyval("TableIndex", fmt::Nval(table_index)),
-            keyval("Table", fmt::Qstr("SSDT"))
+        slog::emit("ssdtmon", drakvuf, info,
+            slog::attr("TableIndex", slog::number(table_index)),
+            slog::attr("Table", slog::text("SSDT"))
         );
     }
     for (size_t i = 0; i < s->w32p_ssdt.size(); i++)
@@ -190,9 +190,9 @@ event_response_t write_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
         if (info->trap_pa >= base && info->trap_pa < base + size)
         {
             int64_t table_index = (info->trap_pa - base + i * VMI_PS_4KB) / sizeof(uint32_t);
-            fmt::print(s->format, "ssdtmon", drakvuf, info,
-                keyval("TableIndex", fmt::Nval(table_index)),
-                keyval("Table", fmt::Qstr("SSDTShadow"))
+            slog::emit("ssdtmon", drakvuf, info,
+                slog::attr("TableIndex", slog::number(table_index)),
+                slog::attr("Table", slog::text("SSDTShadow"))
             );
         }
     }
@@ -277,8 +277,8 @@ std::unique_ptr<libhook::ManualHook> ssdtmon::register_mem_hook(hook_cb_t callba
 
 /* ----------------------------------------------------- */
 
-ssdtmon::ssdtmon(drakvuf_t drakvuf, const ssdtmon_config* config, output_format_t output)
-    : pluginex(drakvuf, output), format{output}, offsets(new size_t[__OFFSET_MAX])
+ssdtmon::ssdtmon(drakvuf_t drakvuf, const ssdtmon_config* config)
+    : pluginex(drakvuf), offsets(new size_t[__OFFSET_MAX])
 {
     addr_t kiservicetable_rva = 0;
     addr_t kiservicelimit_rva = 0;
@@ -443,11 +443,11 @@ bool ssdtmon::stop_impl()
         vmi_lock_guard vmi(drakvuf);
         if (sdt_crc != ssdtmon_sha256_calc(vmi, sdt_va, is64 ? 32 : 16))
         {
-            fmt::print(format, "ssdtmon", drakvuf, nullptr, keyval("Table", fmt::Qstr("SDT")));
+            slog::emit("ssdtmon", drakvuf, nullptr, slog::attr("Table", slog::text("SDT")));
         }
         if (sdt_shadow_crc != ssdtmon_sha256_calc(vmi, sdt_shadow_va, is64 ? 64 : 32))
         {
-            fmt::print(format, "ssdtmon", drakvuf, nullptr, keyval("Table", fmt::Qstr("SDTShadow")));
+            slog::emit("ssdtmon", drakvuf, nullptr, slog::attr("Table", slog::text("SDTShadow")));
         }
     }
     return pluginex::stop_impl();

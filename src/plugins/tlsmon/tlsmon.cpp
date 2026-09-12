@@ -109,7 +109,7 @@
 #include <vector>
 #include <libdrakvuf/json-util.h>
 
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 #include "private.h"
 #include "tlsmon.h"
 
@@ -200,7 +200,6 @@ std::optional< std::vector<tlsmon_priv::ncrypt_buffer_t> > ssl_get_ncrypt_buffer
 static
 event_response_t ssl_generate_session_keys_cb(drakvuf_t drakvuf, drakvuf_trap_info* info)
 {
-    auto plugin = static_cast<tlsmon*>(drakvuf_get_extra_from_running_trap(info->trap));
     ACCESS_CONTEXT(ctx,
         .translate_mechanism = VMI_TM_PROCESS_DTB,
         .dtb = info->regs->cr3
@@ -245,9 +244,9 @@ event_response_t ssl_generate_session_keys_cb(drakvuf_t drakvuf, drakvuf_trap_in
 
         if (buffer_type == tlsmon_priv::NCRYPTBUFFER_SSL_CLIENT_RANDOM)
         {
-            fmt::print(plugin->m_output_format, "tlsmon", drakvuf, info,
-                keyval("client_random", fmt::Qstr(client_random_str)),
-                keyval("master_key", fmt::Qstr(*master_key))
+            slog::emit("tlsmon", drakvuf, info,
+                slog::attr("client_random", slog::text(client_random_str)),
+                slog::attr("master_key", slog::text(*master_key))
             );
         }
         else if (buffer_type != tlsmon_priv::NCRYPTBUFFER_SSL_SERVER_RANDOM)
@@ -275,8 +274,8 @@ void tlsmon::hook_lsass(drakvuf_t drakvuf)
 }
 
 
-tlsmon::tlsmon(drakvuf_t drakvuf, output_format_t output)
-    : pluginex(drakvuf, output)
+tlsmon::tlsmon(drakvuf_t drakvuf)
+    : pluginex(drakvuf)
 {
     if (!drakvuf_are_userhooks_supported(drakvuf))
     {

@@ -127,7 +127,7 @@ static std::string whitelisted_libraries[] =
     "windows\\system32\\wow64win.dll"
 };
 
-static bool enum_modules_cb(drakvuf_t dravkuf, const module_info_t* module_info, bool* need_free, bool* need_stop, void* ctx)
+static bool enum_modules_cb(drakvuf_t dravkuf, const module_info_t* module_info, bool*, bool*, void* ctx)
 {
     // Skip modules without a full_name (can be NULL for some kernel modules)
     if (!module_info->full_name || !module_info->full_name->contents)
@@ -137,7 +137,7 @@ static bool enum_modules_cb(drakvuf_t dravkuf, const module_info_t* module_info,
     auto& modules = plugin->procs[module_info->pid];
     modules.push_back(
     {
-        .name = (const char*)module_info->full_name->contents,
+        .name = slog::escaped_text(module_info->full_name),
         .base = module_info->base_addr,
         .size = module_info->size
     });
@@ -229,9 +229,9 @@ static std::vector<uint64_t> extract_args(drakvuf_t drakvuf, drakvuf_trap_info_t
     return args;
 }
 
-static std::optional<std::string> resolve_module(drakvuf_t drakvuf, addr_t addr, addr_t process, vmi_pid_t pid, win_syscalls* s)
+static std::optional<syscalls_module> resolve_module(drakvuf_t drakvuf, addr_t addr, addr_t process, vmi_pid_t pid, win_syscalls* s)
 {
-    auto lookup = [&]() -> std::optional<std::string>
+    auto lookup = [&]() -> std::optional<syscalls_module>
     {
         const auto& mods = s->procs.find(pid);
         if (mods != s->procs.end())
@@ -240,7 +240,7 @@ static std::optional<std::string> resolve_module(drakvuf_t drakvuf, addr_t addr,
             {
                 if (addr >= module.base && addr < module.base + module.size)
                 {
-                    return module.name;
+                    return module;
                 }
             }
         }
@@ -265,24 +265,24 @@ static std::optional<std::string> resolve_module(drakvuf_t drakvuf, addr_t addr,
         auto& mods = s->procs[pid];
         if (mmvad.file_name_ptr)
         {
-            if (auto u_name = drakvuf_read_unicode_va(drakvuf, mmvad.file_name_ptr, 0))
+            unicode_string u_name(drakvuf, mmvad.file_name_ptr, 0);
+            if (u_name.get())
             {
-                std::string name = (const char*)u_name->contents;
+                std::string name = u_name.printable_text();
                 mods.push_back(
                 {
                     .name = std::move(name),
                     .base = mmvad.starting_vpn << 12,
                         .size = (mmvad.ending_vpn - mmvad.starting_vpn) << 12
                 });
-                vmi_free_unicode_str(u_name);
-                return mods.back().name;
+                return mods.back();
             }
         }
     }
     return {};
 }
 
-static std::optional<std::string> resolve_parent_module(drakvuf_t drakvuf, drakvuf_trap_info_t* info, win_syscalls* s)
+static std::optional<syscalls_module> resolve_parent_module(drakvuf_t drakvuf, drakvuf_trap_info_t* info, win_syscalls* s)
 {
     vmi_lock_guard vmi(drakvuf);
     addr_t rsp, top;
@@ -297,7 +297,7 @@ static std::optional<std::string> resolve_parent_module(drakvuf_t drakvuf, drakv
 
 /// Get module that called Nt (syscall) function and previous mode.
 ///
-static std::tuple<privilege_mode_t, std::optional<std::string>, std::optional<std::string>>
+static std::tuple<privilege_mode_t, std::optional<syscalls_module>, std::optional<syscalls_module>>
     get_syscall_retinfo(drakvuf_t drakvuf, drakvuf_trap_info_t* info, win_syscalls* s)
 {
     if (s->is32bit)
@@ -323,7 +323,7 @@ static std::tuple<privilege_mode_t, std::optional<std::string>, std::optional<st
         //
         if (module.has_value())
         {
-            auto resolved_lib = module.value();
+            auto resolved_lib = module->name;
             for (auto& c : resolved_lib)
                 c = std::tolower(c);
             for (const auto& lib : whitelisted_libraries)
@@ -331,7 +331,8 @@ static std::tuple<privilege_mode_t, std::optional<std::string>, std::optional<st
                 if (resolved_lib.length() >= lib.length() &&
                     resolved_lib.compare(resolved_lib.length() - lib.length(), lib.length(), lib) == 0)
                 {
-                    return { mode, std::move(resolved_lib), resolve_parent_module(drakvuf, info, s) };
+                    module->name = std::move(resolved_lib);
+                    return { mode, std::move(module), resolve_parent_module(drakvuf, info, s) };
                 }
             }
         }
@@ -541,8 +542,8 @@ bool win_syscalls::trap_syscall_table_entries(drakvuf_t drakvuf, vmi_instance_t 
     return true;
 }
 
-win_syscalls::win_syscalls(drakvuf_t drakvuf, const syscalls_config* config, output_format_t output)
-    : syscalls_base(drakvuf, config, output)
+win_syscalls::win_syscalls(drakvuf_t drakvuf, const syscalls_config* config)
+    : syscalls_base(drakvuf, config)
     , win32k_profile{ config->win32k_profile ?: "" }
 {
     auto vmi = vmi_lock_guard(drakvuf);
@@ -677,18 +678,7 @@ bool win_syscalls::setup_win32k_syscalls(drakvuf_t drakvuf)
 
 char* win_syscalls::win_extract_string(drakvuf_t drakvuf, drakvuf_trap_info_t* info, const arg_t& arg, addr_t val)
 {
-    if (arg.type == PUNICODE_STRING)
-    {
-        unicode_string_t* us = drakvuf_read_unicode(drakvuf, info, val);
-        if (us)
-        {
-            char* str = (char*)us->contents;
-            us->contents = nullptr; // move ownership
-            vmi_free_unicode_str(us);
-            return str;
-        }
-    }
-    else if ( arg.type == POBJECT_ATTRIBUTES )
+    if ( arg.type == POBJECT_ATTRIBUTES )
     {
         char* filename = drakvuf_get_filename_from_object_attributes(drakvuf, info, val);
         if ( filename ) return filename;
@@ -787,51 +777,49 @@ void win_syscalls::print_syscall(
     drakvuf_t drakvuf, drakvuf_trap_info_t* info,
     int nr, const char* module, const syscall_t* sc,
     std::vector<uint64_t> args, privilege_mode_t mode,
-    std::optional<std::string> from_dll,
-    std::optional<std::string> from_parent_dll
+    std::optional<syscalls_module> from_dll,
+    std::optional<syscalls_module> from_parent_dll
 )
 {
     if (sc)
         info->trap->name = sc->name;
 
-    this->fmt_args.clear();
+    std::vector<slog::keyval> fmt_args;
 
     if (sc)
     {
         for (size_t i = 0; i < args.size(); ++i)
         {
             auto str = this->parse_argument(drakvuf, info, sc->args[i], args[i]);
-            if ( !str.empty() )
-                this->fmt_args.push_back(keyval(sc->args[i].name, fmt::Estr(str)));
+            if (str)
+                fmt_args.push_back(slog::attr(sc->args[i].name, *str));
             else
             {
                 uint64_t val = transform_value(drakvuf, info, sc->args[i], args[i]);
-                this->fmt_args.push_back(keyval(sc->args[i].name, fmt::Xval(val)));
+                fmt_args.push_back(slog::attr(sc->args[i].name, slog::hex(val)));
             }
         }
     }
 
-    std::optional<fmt::Estr<std::string>> from_dll_opt, from_parent_dll_opt;
-    std::optional<fmt::Rstr<const char*>> priv_mode_opt;
+    std::optional<slog::value> from_dll_opt, from_parent_dll_opt;
+    std::optional<slog::value> priv_mode_opt;
 
     if (from_dll.has_value())
-        from_dll_opt = fmt::Estr(std::move(*from_dll));
+        from_dll_opt = slog::text(from_dll->name);
 
     if (from_parent_dll.has_value())
-        from_dll_opt = fmt::Estr(std::move(*from_parent_dll));
+        from_dll_opt = slog::text(from_parent_dll->name);
 
     if (mode != MAXIMUM_MODE)
-        priv_mode_opt = fmt::Rstr(mode == USER_MODE ? "User" : "Kernel");
+        priv_mode_opt = slog::text(mode == USER_MODE ? "User" : "Kernel");
 
-    fmt::print(this->m_output_format, "syscall", drakvuf, info,
-        keyval("Module", fmt::Qstr(std::move(module))),
-        keyval("vCPU", fmt::Nval(info->vcpu)),
-        keyval("CR3", fmt::Xval(info->regs->cr3)),
-        keyval("Syscall", fmt::Nval(nr)),
-        keyval("NArgs", fmt::Nval(args.size())),
-        keyval("PreviousMode", priv_mode_opt),
-        keyval("FromModule", from_dll_opt),
-        keyval("FromParentModule", from_parent_dll_opt),
+    slog::emit("syscall", drakvuf, info,
+        slog::attr("Module", slog::text(std::move(module))),
+        slog::attr("Syscall", slog::number(nr)),
+        slog::attr("NArgs", slog::number(args.size())),
+        slog::attr("PreviousMode", priv_mode_opt),
+        slog::attr("FromModule", from_dll_opt),
+        slog::attr("FromParentModule", from_parent_dll_opt),
         std::move(fmt_args)
     );
 }

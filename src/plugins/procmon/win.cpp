@@ -108,7 +108,7 @@
 #include <libdrakvuf/ntstatus.h>
 
 #include "../plugins.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 #include "win.h"
 #include "winnt.h"
 #include "privileges.h"
@@ -165,7 +165,6 @@ struct process_create_ex_result_t: public call_result_t
 
 struct process_visitor_ctx
 {
-    output_format_t format;
 };
 
 } // namespace
@@ -186,7 +185,9 @@ static void print_process_creation_result(
     unicode_string_t* imagepath_us = drakvuf_read_unicode(drakvuf, info, imagepath_addr);
     unicode_string_t* dllpath_us = drakvuf_read_unicode(drakvuf, info, dllpath_addr);
 
-    char* curdir = nullptr;
+    unicode_string_t* curdir_us = nullptr;
+    slog::value curdir;
+    bool have_curdir = false;
     {
         auto vmi = vmi_lock_guard(drakvuf);
         ACCESS_CONTEXT(ctx,
@@ -197,25 +198,22 @@ static void print_process_creation_result(
         addr_t curdir_handle = 0;
 
         if (VMI_SUCCESS == vmi_read_addr(vmi, &ctx, &curdir_handle))
-            curdir = drakvuf_get_filename_from_handle(drakvuf, info, curdir_handle);
-    }
-
-    if (!curdir)
-    {
-        unicode_string_t* curdir_us = drakvuf_read_unicode(drakvuf, info, curdir_dospath_addr);
-        if (curdir_us)
         {
-            curdir = (char*)curdir_us->contents;
-            curdir_us->contents = nullptr;
-            vmi_free_unicode_str(curdir_us);
+            char* value = drakvuf_get_filename_from_handle(drakvuf, info, curdir_handle);
+            if (value)
+            {
+                curdir = slog::text(value);
+                have_curdir = true;
+                g_free(value);
+            }
         }
-        else
-            curdir = g_strdup("");
     }
 
-    gchar* cmdline = g_strescape(cmdline_us ? reinterpret_cast<char const*>(cmdline_us->contents) : "", NULL);
-    char const* imagepath = imagepath_us ? reinterpret_cast<char const*>(imagepath_us->contents) : "";
-    char const* dllpath = dllpath_us ? reinterpret_cast<char const*>(dllpath_us->contents) : "";
+    if (!have_curdir)
+    {
+        curdir_us = drakvuf_read_unicode(drakvuf, info, curdir_dospath_addr);
+        curdir = slog::value(curdir_us);
+    }
 
     addr_t process, dtb;
     proc_data_t proc_data{};
@@ -224,21 +222,22 @@ static void print_process_creation_result(
         drakvuf_get_process_data(drakvuf, process, &proc_data);
     }
 
-    fmt::print(f->m_output_format, "procmon", drakvuf, info,
-        keyval("Status", fmt::Xval(status)),
-        keyval("NewProcessHandle", fmt::Xval(new_process_handle)),
-        keyval("NewPid", fmt::Nval(new_pid)),
-        keyval("NewThreadHandle", fmt::Xval(new_thread_handle)),
-        keyval("NewTid", fmt::Nval(new_tid)),
-        keyval("CommandLine", fmt::Qstr(cmdline)),
-        keyval("ImagePathName", fmt::Qstr(imagepath)),
-        keyval("DllPath", fmt::Qstr(dllpath)),
-        keyval("CWD", fmt::Qstr(curdir)),
-        keyval("Bitness", fmt::Nval(static_cast<int>(proc_data.bitness)))
+    slog::emit("procmon", drakvuf, info,
+        slog::attr("Status", slog::hex(status)),
+        slog::attr("NewProcessHandle", slog::hex(new_process_handle)),
+        slog::attr("NewPid", slog::number(new_pid)),
+        slog::attr("NewThreadHandle", slog::hex(new_thread_handle)),
+        slog::attr("NewTid", slog::number(new_tid)),
+        slog::attr("CommandLine", cmdline_us),
+        slog::attr("ImagePathName", imagepath_us),
+        slog::attr("DllPath", dllpath_us),
+        slog::attr("CWD", curdir),
+        slog::attr("Bitness", slog::number(static_cast<int>(proc_data.bitness)))
     );
 
-    g_free(cmdline);
-    g_free(curdir);
+    if (curdir_us)
+        vmi_free_unicode_str(curdir_us);
+
     if (cmdline_us)
         vmi_free_unicode_str(cmdline_us);
 
@@ -331,19 +330,19 @@ static event_response_t process_create_ex_return_hook(drakvuf_t drakvuf, drakvuf
         drakvuf_get_process_data(drakvuf, process, &proc_data);
     }
 
-    fmt::print(plugin->m_output_format, "procmon", drakvuf, info,
-        keyval("Status", fmt::Xval(status)),
-        keyval("ProcessHandle", fmt::Xval(process_handle)),
-        keyval("DesiredAccess", fmt::Xval(params->desired_access)),
-        keyval("ObjectAttributes", fmt::Xval(params->object_attributes_addr)),
-        keyval("ParentProcess", fmt::Xval(params->parent_process)),
-        keyval("Flags", fmt::Xval(params->flags)),
-        keyval("SectionHandle", fmt::Xval(params->section_handle)),
-        keyval("DebugPort", fmt::Xval(params->debug_port)),
-        keyval("ExceptionPort", fmt::Xval(params->exception_port)),
-        keyval("JobMemberLevel", fmt::Nval(params->job_member_level)),
-        keyval("NewPid", fmt::Nval(new_pid)),
-        keyval("Bitness", fmt::Nval(static_cast<int>(proc_data.bitness)))
+    slog::emit("procmon", drakvuf, info,
+        slog::attr("Status", slog::hex(status)),
+        slog::attr("ProcessHandle", slog::hex(process_handle)),
+        slog::attr("DesiredAccess", slog::hex(params->desired_access)),
+        slog::attr("ObjectAttributes", slog::hex(params->object_attributes_addr)),
+        slog::attr("ParentProcess", slog::hex(params->parent_process)),
+        slog::attr("Flags", slog::hex(params->flags)),
+        slog::attr("SectionHandle", slog::hex(params->section_handle)),
+        slog::attr("DebugPort", slog::hex(params->debug_port)),
+        slog::attr("ExceptionPort", slog::hex(params->exception_port)),
+        slog::attr("JobMemberLevel", slog::number(params->job_member_level)),
+        slog::attr("NewPid", slog::number(new_pid)),
+        slog::attr("Bitness", slog::number(static_cast<int>(proc_data.bitness)))
     );
 
     if (proc_data.name)
@@ -421,10 +420,10 @@ static event_response_t terminate_process_hook(
     if (!exit_status_str)
         exit_status_str = ntstatus_format_string(ntstatus_t(exit_status), exit_status_buf, sizeof(exit_status_buf));
 
-    fmt::print(plugin->m_output_format, "procmon", drakvuf, info,
-        keyval("ExitPid", fmt::Nval(exit_pid)),
-        keyval("ExitStatus", fmt::Xval(exit_status)),
-        keyval("ExitStatusStr", fmt::Qstr(exit_status_str))
+    slog::emit("procmon", drakvuf, info,
+        slog::attr("ExitPid", slog::number(exit_pid)),
+        slog::attr("ExitStatus", slog::hex(exit_status)),
+        slog::attr("ExitStatusStr", slog::text(exit_status_str))
     );
 
     return VMI_EVENT_RESPONSE_NONE;
@@ -439,8 +438,8 @@ static event_response_t clean_process_address_space_hook_cb(drakvuf_t drakvuf, d
     if (!drakvuf_get_process_pid(drakvuf, cleaned_process_base, &exit_pid))
         exit_pid = -1;
 
-    fmt::print(plugin->m_output_format, "procmon", drakvuf, info,
-        keyval("ExitPid", fmt::Nval(exit_pid))
+    slog::emit("procmon", drakvuf, info,
+        slog::attr("ExitPid", slog::number(exit_pid))
     );
 
     return VMI_EVENT_RESPONSE_NONE;
@@ -508,15 +507,12 @@ static event_response_t open_process_return_hook_cb(drakvuf_t drakvuf, drakvuf_t
     if (drakvuf_find_process(drakvuf, params->client_id, nullptr, &client_process))
         name = drakvuf_get_process_name(drakvuf, client_process, true);
 
-    if (!name)
-        name = g_strdup("<UNKNOWN>");
-
-    fmt::print(plugin->m_output_format, "procmon", drakvuf, info,
-        keyval("ProcessHandle", fmt::Xval(process_handle)),
-        keyval("DesiredAccess", fmt::Xval(params->desired_access)),
-        keyval("ObjectAttributes", fmt::Xval(params->object_attributes_addr)),
-        keyval("ClientID", fmt::Nval(params->client_id)),
-        keyval("ClientName", fmt::Qstr(name))
+    slog::emit("procmon", drakvuf, info,
+        slog::attr("ProcessHandle", slog::hex(process_handle)),
+        slog::attr("DesiredAccess", slog::hex(params->desired_access)),
+        slog::attr("ObjectAttributes", slog::hex(params->object_attributes_addr)),
+        slog::attr("ClientID", slog::number(params->client_id)),
+        slog::attr("ClientName", slog::text(name))
     );
 
     g_free(name);
@@ -591,16 +587,13 @@ static event_response_t open_thread_return_hook_cb(drakvuf_t drakvuf, drakvuf_tr
     if (drakvuf_find_process(drakvuf, params->client_id, nullptr, &client_process))
         name = drakvuf_get_process_name(drakvuf, client_process, true);
 
-    if (!name)
-        name = g_strdup("<UNKNOWN>");
-
-    fmt::print(plugin->m_output_format, "procmon", drakvuf, info,
-        keyval("ThreadHandle", fmt::Xval(thread_handle)),
-        keyval("DesiredAccess", fmt::Xval(params->desired_access)),
-        keyval("ObjectAttributes", fmt::Xval(params->object_attributes_addr)),
-        keyval("ClientID", fmt::Nval(params->client_id)),
-        keyval("ClientName", fmt::Qstr(name)),
-        keyval("UniqueThread", fmt::Nval(params->unique_thread))
+    slog::emit("procmon", drakvuf, info,
+        slog::attr("ThreadHandle", slog::hex(thread_handle)),
+        slog::attr("DesiredAccess", slog::hex(params->desired_access)),
+        slog::attr("ObjectAttributes", slog::hex(params->object_attributes_addr)),
+        slog::attr("ClientID", slog::number(params->client_id)),
+        slog::attr("ClientName", slog::text(name)),
+        slog::attr("UniqueThread", slog::number(params->unique_thread))
     );
     g_free(name);
     plugin->destroy_trap(info->trap);
@@ -660,9 +653,9 @@ static event_response_t protect_virtual_memory_hook_cb(drakvuf_t drakvuf, drakvu
 
     auto plugin = get_trap_plugin<win_procmon>(info);
 
-    fmt::print(plugin->m_output_format, "procmon", drakvuf, info,
-        keyval("ProcessHandle", fmt::Xval(process_handle)),
-        keyval("NewProtectWin32", fmt::Qstr(stringify_protection_attributes(new_protect)))
+    slog::emit("procmon", drakvuf, info,
+        slog::attr("ProcessHandle", slog::hex(process_handle)),
+        slog::attr("NewProtectWin32", slog::flags(new_protect, page_protection_flags))
     );
 
     return VMI_EVENT_RESPONSE_NONE;
@@ -670,7 +663,7 @@ static event_response_t protect_virtual_memory_hook_cb(drakvuf_t drakvuf, drakvu
 
 static event_response_t adjust_privileges_token_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
 {
-    std::vector<std::pair<std::string, fmt::Aarg>> privileges;
+    std::vector<slog::keyval> privileges;
     struct TOKEN_PRIVILEGES* newstate = nullptr;
     // HANDLE TokenHandle
     uint32_t token_handle = drakvuf_get_function_argument(drakvuf, info, 1);
@@ -680,7 +673,7 @@ static event_response_t adjust_privileges_token_cb(drakvuf_t drakvuf, drakvuf_tr
     auto plugin = get_trap_plugin<win_procmon>(info);
 
     if (disable_all)
-        privileges.push_back(keyval("DisableAll", fmt::Nval(1UL)));
+        privileges.push_back(slog::attr("DisableAll", slog::number(1UL)));
     else
     {
         auto vmi = vmi_lock_guard(drakvuf);
@@ -712,9 +705,9 @@ static event_response_t adjust_privileges_token_cb(drakvuf_t drakvuf, drakvuf_tr
             privileges.push_back(stringify_privilege(newstate->privileges[i]));
     }
 
-    fmt::print(plugin->m_output_format, "procmon", drakvuf, info,
-        keyval("ProcessHandle", fmt::Nval(token_handle)),
-        keyval("NewState", privileges)
+    slog::emit("procmon", drakvuf, info,
+        slog::attr("ProcessHandle", slog::number(token_handle)),
+        slog::attr("NewState", privileges)
     );
 
 done:
@@ -736,14 +729,14 @@ static void process_visitor(drakvuf_t drakvuf, addr_t process, void* visitor_ctx
 
     gint64 t = g_get_real_time();
 
-    fmt::print_running_process(ctx->format, "procmon", drakvuf, t, data);
+    slog::emit_running_process("procmon", t, data);
 
     g_free(const_cast<char*>(data.name));
 }
 
-win_procmon::win_procmon(drakvuf_t drakvuf, output_format_t output) : pluginex(drakvuf, output)
+win_procmon::win_procmon(drakvuf_t drakvuf) : pluginex(drakvuf)
 {
-    struct process_visitor_ctx ctx = { .format = output };
+    struct process_visitor_ctx ctx = {};
     drakvuf_enumerate_processes(drakvuf, process_visitor, &ctx);
 
     if (!drakvuf_get_kernel_struct_members_array_rva(drakvuf, windows_offset_names, this->offsets.size(), this->offsets.data()))

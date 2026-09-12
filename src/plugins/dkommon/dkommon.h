@@ -109,6 +109,8 @@
 
 #include <string>
 #include <set>
+#include <map>
+#include <memory>
 
 struct dkommon_config
 {
@@ -118,14 +120,13 @@ struct dkommon_config
 class dkommon: public pluginex
 {
 public:
-    const output_format_t format;
     size_t* offsets;
     uint16_t winver;
 
     std::set<vmi_pid_t> live_processes;
     std::set<vmi_pid_t> dead_processes;
 
-    std::set<std::string> loaded_drivers;
+    std::map<std::string, unicode_string> loaded_drivers;
 
     vmi_pid_t srv_pid;
     addr_t srv_module_base;
@@ -133,7 +134,7 @@ public:
     drakvuf_trap_t srv_trap[2];
     std::set<addr_t> loaded_services;
 
-    dkommon(drakvuf_t drakvuf, const dkommon_config* config, output_format_t output);
+    dkommon(drakvuf_t drakvuf, const dkommon_config* config);
     dkommon(const dkommon&) = delete;
     dkommon& operator=(const dkommon&) = delete;
     ~dkommon();

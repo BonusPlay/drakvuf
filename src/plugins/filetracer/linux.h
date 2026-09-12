@@ -190,7 +190,7 @@ public:
     std::string get_filepath_locked(drakvuf_t drakvuf, drakvuf_trap_info_t* info, vmi_instance_t vmi, addr_t dentry_addr);
     char* read_filename(drakvuf_t drakvuf, drakvuf_trap_info_t* info, addr_t fileaddr);
 
-    linux_filetracer(drakvuf_t drakvuf, output_format_t output);
+    linux_filetracer(drakvuf_t drakvuf);
     linux_filetracer(const linux_filetracer&) = delete;
     linux_filetracer& operator=(const linux_filetracer&) = delete;
 };

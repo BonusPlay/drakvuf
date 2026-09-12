@@ -137,17 +137,8 @@
 
 #include <libdrakvuf/json-util.h>
 #include "codemon.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 #include "private.h"
-
-/**
- * The default string, for incomplete entries.
- */
-static char missing_data[] = "(null)";
-/**
- * The string used for vad nodes, that don't belong to mapped files, but to dynamically allocated memory
- */
-static char alloc_memory[] = "(no-mapped-file)";
 
 // See codemon.h -> codemon_config_struct
 static bool log_everything = false;
@@ -164,43 +155,28 @@ static bool default_benign = false;
  */
 void codemon::save_file_metadata(const drakvuf_trap_info_t* trap_info, const dump_metadata_struct* dump_metadata, addr_t page_va)
 {
-    auto output_file = std::ofstream{dump_metadata->meta_file};
-    if (!output_file)
-    {
-        PRINT_DEBUG("[CODEMON] ERROR: failed to open metadata file (%s), this shouldn't happen!\n", dump_metadata->meta_file);
-        return;
-    }
+    slog::keyval_array record;
+    record.push_back(slog::attr("TimeStamp", slog::time(trap_info->timestamp)));
+    record.push_back(slog::attr("PID", slog::number(trap_info->attached_proc_data.pid)));
+    record.push_back(slog::attr("PPID", slog::number(trap_info->attached_proc_data.ppid)));
+    record.push_back(slog::attr("TID", slog::number(trap_info->attached_proc_data.tid)));
+    record.push_back(slog::attr("UserID", slog::number(trap_info->attached_proc_data.userid)));
+    record.push_back(slog::attr("ProcessName", slog::text(trap_info->attached_proc_data.name)));
+    record.push_back(slog::attr("EventUID", slog::number(trap_info->event_uid)));
+    record.push_back(slog::attr("CR3", slog::hex(trap_info->regs->cr3)));
+    record.push_back(slog::attr("PageVA", slog::hex(page_va)));
+    record.push_back(slog::attr("VADBase", slog::hex(dump_metadata->vad_node_base)));
+    record.push_back(slog::attr("VADEnd", slog::hex(dump_metadata->vad_node_end)));
+    record.push_back(slog::attr("VADName", dump_metadata->vad_name));
+    record.push_back(slog::attr("DumpSize", slog::hex(dump_metadata->dump_size)));
+    record.push_back(slog::attr("DumpFile", slog::text(dump_metadata->dump_file)));
+    record.push_back(slog::attr("SHA256", slog::text(dump_metadata->sha256sum)));
+    record.push_back(slog::attr("DumpID", slog::number(this->dump_id)));
+    record.push_back(slog::attr("TrapPA", slog::hex(trap_info->trap_pa)));
+    record.push_back(slog::attr("GFN", slog::hex(trap_info->trap->memaccess.gfn)));
 
-    //Determines the string that shall be printed as vad_name
-    char* actual_vad_name;
-    if (dump_metadata->vad_name == nullptr)
-        actual_vad_name = alloc_memory;
-    else
-        actual_vad_name = (char*) dump_metadata->vad_name->contents;
-
-    json_object* json_object = json_object_new_object();
-    auto timestamp = TimeVal{UNPACK_TIMEVAL(trap_info->timestamp)};
-    json_object_object_add(json_object, "TimeStamp", json_object_new_string_fmt("%ld.%ld", timestamp.tv_sec, timestamp.tv_usec));
-    json_object_object_add(json_object, "PID", json_object_new_int(trap_info->attached_proc_data.pid));
-    json_object_object_add(json_object, "PPID", json_object_new_int(trap_info->attached_proc_data.ppid));
-    json_object_object_add(json_object, "TID", json_object_new_int(trap_info->attached_proc_data.tid));
-    json_object_object_add(json_object, "UserID", json_object_new_int(trap_info->attached_proc_data.userid));
-    json_object_object_add(json_object, "ProcessName", json_object_new_string(trap_info->attached_proc_data.name));
-    json_object_object_add(json_object, "EventUID", json_object_new_int64(trap_info->event_uid));
-    json_object_object_add(json_object, "CR3", json_object_new_string_fmt("0x%" PRIx64, trap_info->regs->cr3));
-    json_object_object_add(json_object, "PageVA", json_object_new_string_fmt("0x%" PRIx64, page_va));
-    json_object_object_add(json_object, "VADBase", json_object_new_string_fmt("0x%" PRIx64, dump_metadata->vad_node_base));
-    json_object_object_add(json_object, "VADEnd", json_object_new_string_fmt("0x%" PRIx64, dump_metadata->vad_node_end));
-    json_object_object_add(json_object, "VADName", json_object_new_string(actual_vad_name));
-    json_object_object_add(json_object, "DumpSize", json_object_new_string_fmt("0x%" PRIx64, dump_metadata->dump_size));
-    json_object_object_add(json_object, "DumpFile", json_object_new_string(dump_metadata->dump_file));
-    json_object_object_add(json_object, "SHA256", json_object_new_string(dump_metadata->sha256sum));
-    json_object_object_add(json_object, "DumpID", json_object_new_int(this->dump_id));
-    json_object_object_add(json_object, "TrapPA", json_object_new_string_fmt("0x%" PRIx64, trap_info->trap_pa));
-    json_object_object_add(json_object, "GFN", json_object_new_string_fmt("0x%" PRIx64, trap_info->trap->memaccess.gfn));
-
-    output_file << json_object_get_string(json_object);
-    json_object_put(json_object);
+    if (!slog::write_record(dump_metadata->meta_file, record))
+        PRINT_DEBUG("[CODEMON] ERROR: failed to write metadata file (%s), this shouldn't happen!\n", dump_metadata->meta_file);
 }
 
 /**
@@ -211,56 +187,37 @@ void codemon::save_file_metadata(const drakvuf_trap_info_t* trap_info, const dum
  */
 void codemon::log_all_to_console(const drakvuf_trap_info* trap_info, dump_metadata_struct* dump_metadata, addr_t page_va)
 {
-    unsigned int actual_dump_id;
-    int actual_dump_size;
-    const char* actual_checksum;
-    char* actual_dump_file_path;
-    char* actual_metafile;
-    char* actual_vad_name;
+    //If the memory was not dumped these values do not exist; say so rather than
+    //inventing a file name and a zero size.
+    std::optional<slog::value> actual_dump_id;
+    std::optional<slog::value> actual_dump_size;
+    const char* actual_checksum = nullptr;
+    const char* actual_dump_file_path = nullptr;
+    const char* actual_metafile = nullptr;
 
-    //If the memory was not dumped some values should be reset as they would not make sense.
-    if (dump_metadata->dump_file == nullptr)
+    if (dump_metadata->dump_file != nullptr)
     {
-        actual_dump_id = 0;
-        actual_dump_size = 0;
-        actual_checksum = missing_data;
-        actual_dump_file_path = missing_data;
-        actual_metafile = missing_data;
-    }
-    else
-    {
-        actual_dump_id = this->dump_id;
-        actual_dump_size = dump_metadata->dump_size;
+        actual_dump_id = slog::number(this->dump_id);
+        actual_dump_size = slog::number(dump_metadata->dump_size);
         actual_checksum = dump_metadata->sha256sum;
         actual_dump_file_path = dump_metadata->dump_file;
         actual_metafile = dump_metadata->meta_file;
     }
 
-    //Determines the string that shall be printed as vad_name
-    if (dump_metadata->vad_name == nullptr)
-    {
-        actual_vad_name = alloc_memory;
-    }
-    else
-    {
-        actual_vad_name = (char*) dump_metadata->vad_name->contents;
-    }
-
     //Log everything to the screen
-    fmt::print(this->m_output_format, "codemon", this->drakvuf, trap_info,
-        keyval("EventType", fmt::Qstr("execframe")),
-        keyval("CR3", fmt::Xval(trap_info->regs->cr3)),
-        keyval("PageVA", fmt::Xval(page_va)),
-        keyval("VADBase", fmt::Xval(dump_metadata->vad_node_base)),
-        keyval("VADEnd", fmt::Xval(dump_metadata->vad_node_end)),
-        keyval("VADName", fmt::Qstr(actual_vad_name)),
-        keyval("DumpSize", fmt::Nval(actual_dump_size)),
-        keyval("DumpFile", fmt::Qstr(actual_dump_file_path)),
-        keyval("SHA256", fmt::Qstr(actual_checksum)),
-        keyval("DumpID", fmt::Nval(actual_dump_id)),
-        keyval("MetaFile", fmt::Qstr(actual_metafile)),
-        keyval("TrapPA", fmt::Xval(trap_info->trap_pa)),
-        keyval("GFN", fmt::Xval(trap_info->trap->memaccess.gfn))
+    slog::emit("codemon", this->drakvuf, trap_info,
+        slog::attr("EventType", slog::text("execframe")),
+        slog::attr("PageVA", slog::hex(page_va)),
+        slog::attr("VADBase", slog::hex(dump_metadata->vad_node_base)),
+        slog::attr("VADEnd", slog::hex(dump_metadata->vad_node_end)),
+        slog::attr("VADName", dump_metadata->vad_name),
+        slog::attr("DumpSize", actual_dump_size),
+        slog::attr("DumpFile", slog::text(actual_dump_file_path)),
+        slog::attr("SHA256", slog::text(actual_checksum)),
+        slog::attr("DumpID", actual_dump_id),
+        slog::attr("MetaFile", slog::text(actual_metafile)),
+        slog::attr("TrapPA", slog::hex(trap_info->trap_pa)),
+        slog::attr("GFN", slog::hex(trap_info->trap->memaccess.gfn))
     );
 }
 
@@ -281,10 +238,6 @@ void free_all(dump_metadata_struct* dump_metadata)
     if (dump_metadata->meta_file)
     {
         free(dump_metadata->meta_file);
-    }
-    if (dump_metadata->vad_name)
-    {
-        vmi_free_unicode_str(dump_metadata->vad_name);
     }
     g_free((gpointer) dump_metadata->sha256sum);
 }
@@ -571,27 +524,25 @@ bool setup_dump_context(mmvad_info_t mmvad,
 bool retrieve_and_filter_vad_name(drakvuf_t drakvuf, addr_t file_name_ptr, dump_metadata_struct* dump_metadata)
 {
     //Read the name of the dll/binary this node belongs to
-    dump_metadata->vad_name = drakvuf_read_unicode_va(drakvuf, file_name_ptr, 0);
+    dump_metadata->vad_name = unicode_string(drakvuf, file_name_ptr, 0);
 
-    if (dump_metadata->vad_name != nullptr)
+    //If we don't want to analyse the vad belonging to system files:
+    if (!analyse_system_dll_vad)
     {
-        //If we don't want to analyse the vad belonging to system files:
-        if (!analyse_system_dll_vad)
-        {
-            //Exclude current memory area from analysis, if instructions are fetched from a System32 or SysWOW64 DLL
+        //Exclude current memory area from analysis, if instructions are fetched from a System32 or SysWOW64 DLL
 
-            //TODO FutureWork: In general it might be not secure to discard these DLLs since a malware might be able to
-            // place DLLs here as well.
-            if (strstr((char*) dump_metadata->vad_name->contents, "System32") != nullptr)
-            {
-                PRINT_DEBUG("[CODEMON] Ignoring instruction fetch within System32 DLL\n");
-                return false;
-            }
-            if (strstr((char*) dump_metadata->vad_name->contents, "SysWOW64") != nullptr)
-            {
-                PRINT_DEBUG("[CODEMON] Ignoring instruction fetch within SysWOW64 DLL\n");
-                return false;
-            }
+        //TODO FutureWork: In general it might be not secure to discard these DLLs since a malware might be able to
+        // place DLLs here as well.
+        const auto name = dump_metadata->vad_name.printable_text();
+        if (name.find("System32") != std::string::npos)
+        {
+            PRINT_DEBUG("[CODEMON] Ignoring instruction fetch within System32 DLL\n");
+            return false;
+        }
+        if (name.find("SysWOW64") != std::string::npos)
+        {
+            PRINT_DEBUG("[CODEMON] Ignoring instruction fetch within SysWOW64 DLL\n");
+            return false;
         }
     }
 
@@ -760,12 +711,11 @@ event_response_t codemon::write_faulted_cb(drakvuf_t drakvuf, drakvuf_trap_info_
     auto params = libhook::GetTrapParams<AccessFaultResult>(trap_info);
     if (log_everything)
     {
-        fmt::print(this->m_output_format, "codemon", drakvuf, trap_info,
-            keyval("EventType", fmt::Qstr("writefault")),
-            keyval("FrameVA", fmt::Xval(params->page_va)),
-            keyval("TrapPA", fmt::Xval(trap_info->trap_pa)),
-            keyval("CR3", fmt::Xval(trap_info->regs->cr3)),
-            keyval("GFN", fmt::Xval(trap_info->trap->memaccess.gfn))
+        slog::emit("codemon", drakvuf, trap_info,
+            slog::attr("EventType", slog::text("writefault")),
+            slog::attr("FrameVA", slog::hex(params->page_va)),
+            slog::attr("TrapPA", slog::hex(trap_info->trap_pa)),
+            slog::attr("GFN", slog::hex(trap_info->trap->memaccess.gfn))
         );
     }
 
@@ -927,11 +877,10 @@ event_response_t codemon::mm_access_fault_return_hook_cb(drakvuf_t drakvuf, drak
 
         if (log_everything)
         {
-            fmt::print(this->m_output_format, "codemon", drakvuf, trap_info,
-                keyval("EventType", fmt::Qstr("pagefault")),
-                keyval("CR3", fmt::Xval(trap_info->regs->cr3)),
-                keyval("VA", fmt::Xval(params->page_va)),
-                keyval("PA", fmt::Xval(p_info.paddr))
+            slog::emit("codemon", drakvuf, trap_info,
+                slog::attr("EventType", slog::text("pagefault")),
+                slog::attr("VA", slog::hex(params->page_va)),
+                slog::attr("PA", slog::hex(p_info.paddr))
             );
         }
 
@@ -1059,8 +1008,8 @@ event_response_t codemon::ki_system_service_handler_cb(drakvuf_t drakvuf, drakvu
     return VMI_EVENT_RESPONSE_SET_REGISTERS;
 }
 
-codemon::codemon(drakvuf_t drakvuf, const codemon_config_struct* config, output_format_t output)
-    : pluginex(drakvuf, output)
+codemon::codemon(drakvuf_t drakvuf, const codemon_config_struct* config)
+    : pluginex(drakvuf)
 {
     //Check if the dump directory parameter was provided
     if (!config->dump_dir)

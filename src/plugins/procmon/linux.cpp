@@ -114,7 +114,7 @@
 
 #include "linux.h"
 #include "linux_utils.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 #include "plugins/helpers/hooks.h"
 
 using namespace procmon_ns;
@@ -122,15 +122,8 @@ using namespace procmon_ns;
 namespace
 {
 
-struct process_visitor_ctx
+void process_visitor(drakvuf_t drakvuf, addr_t process, void*)
 {
-    output_format_t format;
-};
-
-void process_visitor(drakvuf_t drakvuf, addr_t process, void* visitor_ctx)
-{
-    struct process_visitor_ctx* ctx = reinterpret_cast<struct process_visitor_ctx*>(visitor_ctx);
-
     proc_data_t data = {};
     if (!drakvuf_get_process_data(drakvuf, process, &data))
     {
@@ -140,7 +133,7 @@ void process_visitor(drakvuf_t drakvuf, addr_t process, void* visitor_ctx)
 
     gint64 t = g_get_real_time();
 
-    fmt::print_running_process(ctx->format, "procmon", drakvuf, t, data);
+    slog::emit_running_process("procmon", t, data);
 
     g_free(const_cast<char*>(data.name));
 }
@@ -190,7 +183,7 @@ task_creds linux_procmon::get_current_credentials(drakvuf_t drakvuf, drakvuf_tra
     return creds;
 }
 
-std::string linux_procmon::get_string_from_struct(drakvuf_t drakvuf, drakvuf_trap_info_t* info, addr_t struct_base, int offset_field)
+std::optional<std::string> linux_procmon::get_string_from_struct(drakvuf_t drakvuf, drakvuf_trap_info_t* info, addr_t struct_base, int offset_field)
 {
     addr_t struct_string_ptr;
     if (!get_struct_field_pointer(drakvuf, info, struct_base, offset_field, &struct_string_ptr))
@@ -204,7 +197,9 @@ std::string linux_procmon::get_string_from_struct(drakvuf_t drakvuf, drakvuf_tra
     );
 
     auto tmp = vmi_read_str(vmi, &ctx);
-    std::string result = tmp ?: "";
+    std::optional<std::string> result;
+    if (tmp)
+        result = tmp;
     g_free(tmp);
 
     return result;
@@ -259,21 +254,6 @@ static std::pair<std::string, std::map<std::string, std::string>> parse_top_stac
     return make_pair(command_line, envp_map);
 }
 
-static std::string map_to_str(const std::map<std::string, std::string>& map, output_format_t format, const std::string& empty = "")
-{
-    std::string output;
-
-    for (const auto& el: map)
-        output += el.first + "=" + el.second + ",";
-
-    if (output.empty())
-        output = empty;
-    else
-        output.resize(output.size() - 1);
-
-    return output;
-}
-
 void linux_procmon::configure_filter(const procmon_config* cfg)
 {
     if (cfg->procmon_filter_file)
@@ -314,14 +294,12 @@ event_response_t linux_procmon::do_exit_cb(drakvuf_t drakvuf, drakvuf_trap_info*
 
     char* thread_name = drakvuf_get_process_name(drakvuf, info->proc_data.base_addr, false);
 
-    fmt::print(
-        this->m_output_format,
-        "procmon",
+    slog::emit("procmon",
         drakvuf,
         info,
-        keyval("ThreadName", fmt::Estr(thread_name)),
-        keyval("ExitStatus", fmt::Nval(exit_status)),
-        keyval("ExitStatusStr", fmt::Rstr(exit_status_str))
+        slog::attr("ThreadName", slog::text(thread_name)),
+        slog::attr("ExitStatus", slog::number(exit_status)),
+        slog::attr("ExitStatusStr", slog::text(exit_status_str))
     );
 
     g_free(thread_name);
@@ -337,19 +315,17 @@ event_response_t linux_procmon::send_signal_ret_cb(drakvuf_t drakvuf, drakvuf_tr
 
     auto signal_str = signal_to_string((signal_t)params->signal);
 
-    fmt::print(
-        this->m_output_format,
-        "procmon",
+    slog::emit("procmon",
         drakvuf,
         info,
-        keyval("ThreadName", fmt::Estr(params->thread_name)),
-        keyval("TargetPID", fmt::Nval(params->target_proc_pid)),
-        keyval("TargetTID", fmt::Nval(params->target_proc_tid)),
-        keyval("TargetPPID", fmt::Nval(params->target_proc_ppid)),
-        keyval("TargetProcessName", fmt::Estr(params->target_process_name)),
-        keyval("TargetThreadName", fmt::Estr(params->target_thread_name)),
-        keyval("Signal", fmt::Nval(params->signal)),
-        keyval("SignalStr", fmt::Rstr(signal_str))
+        slog::attr("ThreadName", slog::text(params->thread_name)),
+        slog::attr("TargetPID", slog::number(params->target_proc_pid)),
+        slog::attr("TargetTID", slog::number(params->target_proc_tid)),
+        slog::attr("TargetPPID", slog::number(params->target_proc_ppid)),
+        slog::attr("TargetProcessName", slog::text(params->target_process_name)),
+        slog::attr("TargetThreadName", slog::text(params->target_thread_name)),
+        slog::attr("Signal", slog::number(params->signal)),
+        slog::attr("SignalStr", slog::text(signal_str))
     );
 
     auto hookID = make_hook_id(info, params->target_rsp);
@@ -406,11 +382,14 @@ event_response_t linux_procmon::send_signal_cb(drakvuf_t drakvuf, drakvuf_trap_i
     auto params = libhook::GetTrapParams<send_signal_data>(hook->trap_);
 
     // Save data about current process
-    params->thread_name = current_thread_name ?: "";
+    if (current_thread_name)
+        params->thread_name = current_thread_name;
 
     // Save data about target process
-    params->target_process_name = target_proc_data.name ?: "";
-    params->target_thread_name = target_thread_name ?: "";
+    if (target_proc_data.name)
+        params->target_process_name = target_proc_data.name;
+    if (target_thread_name)
+        params->target_thread_name = target_thread_name;
     params->target_proc_pid = target_proc_data.pid;
     params->target_proc_tid = target_proc_data.tid;
     params->target_proc_ppid = target_proc_data.ppid;
@@ -433,15 +412,13 @@ event_response_t linux_procmon::kernel_clone_ret_cb(drakvuf_t drakvuf, drakvuf_t
 
     uint64_t new_pid = info->regs->rax;
 
-    fmt::print(
-        this->m_output_format,
-        "procmon",
+    slog::emit("procmon",
         drakvuf,
         info,
-        keyval("Flags", fmt::Estr(parse_flags(params->flags, kernel_clone_flags, this->m_output_format))),
-        keyval("Signal", fmt::Nval(params->exit_signal)),
-        keyval("SignalStr", fmt::Estr(signal_to_string((signal_t) params->exit_signal))),
-        keyval("NewPid", fmt::Nval(new_pid))
+        slog::attr("Flags", slog::flags(params->flags, kernel_clone_flags)),
+        slog::attr("Signal", slog::number(params->exit_signal)),
+        slog::attr("SignalStr", slog::text(signal_to_string((signal_t) params->exit_signal))),
+        slog::attr("NewPid", slog::number(new_pid))
     );
 
     auto hookID = make_hook_id(info, params->target_rsp);
@@ -499,32 +476,30 @@ event_response_t linux_procmon::kernel_clone_cb(drakvuf_t drakvuf, drakvuf_trap_
 void linux_procmon::print_info(
     drakvuf_t drakvuf,
     drakvuf_trap_info_t* info,
-    std::vector<std::pair<std::string, std::variant<fmt::Nval<int>, fmt::Nval<unsigned int>, fmt::Estr<std::string>>>> extra_args
+    std::vector<slog::keyval> extra_args
 )
 {
     auto params = libhook::GetTrapParams<execve_data>(info);
 
-    std::vector<std::pair<std::string, fmt::Estr<std::string>>> envp;
+    std::vector<slog::keyval> envp;
     if (!params->envp.empty())
-        envp.emplace_back(keyval("Environment", fmt::Estr(map_to_str(params->envp, this->m_output_format))));
+        envp.emplace_back(slog::attr("Environment", params->envp));
 
     auto proc_data_backup = info->proc_data;
     // Fake caller process data to print correct data
     info->proc_data.name = params->process_name.c_str();
 
-    fmt::print(
-        this->m_output_format,
-        "procmon",
+    slog::emit("procmon",
         drakvuf,
         info,
-        keyval("ThreadName", fmt::Estr(params->thread_name)),
-        keyval("CommandLine", fmt::Estr(params->command_line)),
-        keyval("ImagePathName", fmt::Estr(params->image_path_name)),
-        keyval("ouid", fmt::Nval(params->old_creds.uid)),
-        keyval("osuid", fmt::Nval(params->old_creds.suid)),
-        keyval("oeuid", fmt::Nval(params->old_creds.euid)),
-        keyval("suid", fmt::Nval(params->new_creds.suid)),
-        keyval("euid", fmt::Nval(params->new_creds.euid)),
+        slog::attr("ThreadName", slog::text(params->thread_name)),
+        slog::attr("CommandLine", slog::text(params->command_line)),
+        slog::attr("ImagePathName", slog::text(params->image_path_name)),
+        slog::attr("ouid", slog::number(params->old_creds.uid)),
+        slog::attr("osuid", slog::number(params->old_creds.suid)),
+        slog::attr("oeuid", slog::number(params->old_creds.euid)),
+        slog::attr("suid", slog::number(params->new_creds.suid)),
+        slog::attr("euid", slog::number(params->new_creds.euid)),
         std::move(envp),
         std::move(extra_args)
     );
@@ -571,23 +546,19 @@ event_response_t linux_procmon::execve_ret_cb(drakvuf_t drakvuf, drakvuf_trap_in
     params->new_creds = get_current_credentials(drakvuf, info);
 
     // collect extra usefull information
-    // std::vector<std::pair<std::string, fmt::Estr<std::string>>> extra_args;
-    std::vector<std::pair<std::string, std::variant<fmt::Nval<int>, fmt::Nval<unsigned int>, fmt::Estr<std::string>>>> extra_args;
+    std::vector<slog::keyval> extra_args;
     auto interp = get_string_from_struct(drakvuf, info, params->bprm, _LINUX_BINPRM_INTERP);
-    if (!interp.empty())
-        extra_args.emplace_back(keyval("interp", fmt::Estr(interp)));
+    extra_args.emplace_back(slog::attr("interp", slog::text(interp)));
 
     auto fdpath = get_string_from_struct(drakvuf, info, params->bprm, _LINUX_BINPRM_FDPATH);
-    if (!fdpath.empty())
-        extra_args.emplace_back(keyval("fdpath", fmt::Estr(fdpath)));
+    extra_args.emplace_back(slog::attr("fdpath", slog::text(fdpath)));
 
     auto filename = get_string_from_struct(drakvuf, info, params->bprm, _LINUX_BINPRM_FILENAME);
-    if (!filename.empty())
-        extra_args.emplace_back(keyval("FileName", fmt::Estr(filename)));
+    extra_args.emplace_back(slog::attr("FileName", slog::text(filename)));
 
     uint32_t pgid;
     if (drakvuf_get_process_group_id(drakvuf, info->proc_data.base_addr, &pgid))
-        extra_args.emplace_back(keyval("PGID", fmt::Nval(pgid)));
+        extra_args.emplace_back(slog::attr("PGID", slog::number(pgid)));
 
     uint8_t special_flags;
     ctx.addr = params->bprm + offsets[_LINUX_BINPRM_HAVE_EXECFD];
@@ -596,17 +567,17 @@ event_response_t linux_procmon::execve_ret_cb(drakvuf_t drakvuf, drakvuf_trap_in
         // check if have_execfd set
         if (VMI_GET_BIT(special_flags, 0))
         {
-            extra_args.emplace_back(keyval("have_execfd", fmt::Nval(1)));
+            extra_args.emplace_back(slog::attr("have_execfd", slog::number(1)));
 
             uint32_t execfd;
             ctx.addr = params->bprm + offsets[_LINUX_BINPRM_EXECFD];
             if (VMI_SUCCESS == vmi_read_32(vmi, &ctx, &execfd))
-                extra_args.emplace_back(keyval("execfd", fmt::Nval(execfd)));
+                extra_args.emplace_back(slog::attr("execfd", slog::number(execfd)));
         }
 
         // check if secureexec set
         if (VMI_GET_BIT(special_flags, 2))
-            extra_args.emplace_back(keyval("secureexec", fmt::Nval(1)));
+            extra_args.emplace_back(slog::attr("secureexec", slog::number(1)));
     }
 
     print_info(drakvuf, info, extra_args);
@@ -645,7 +616,8 @@ event_response_t linux_procmon::execve_cb(drakvuf_t drakvuf, drakvuf_trap_info_t
     params->bprm = drakvuf_get_function_argument(drakvuf, info, 1);
     params->process_name = info->proc_data.name;
     char* thread_name = drakvuf_get_process_name(drakvuf, info->proc_data.base_addr, false);
-    params->thread_name = thread_name ?: "";
+    if (thread_name)
+        params->thread_name = thread_name;
     params->old_creds = get_current_credentials(drakvuf, info);
 
     auto hookID = make_hook_id(info, params->target_rsp);
@@ -655,10 +627,9 @@ event_response_t linux_procmon::execve_cb(drakvuf_t drakvuf, drakvuf_trap_info_t
     return VMI_EVENT_RESPONSE_NONE;
 }
 
-linux_procmon::linux_procmon(drakvuf_t drakvuf, const procmon_config* config, output_format_t output) : pluginex(drakvuf, output)
+linux_procmon::linux_procmon(drakvuf_t drakvuf, const procmon_config* config) : pluginex(drakvuf)
 {
-    struct process_visitor_ctx ctx = { .format = output };
-    drakvuf_enumerate_processes(drakvuf, process_visitor, &ctx);
+    drakvuf_enumerate_processes(drakvuf, process_visitor, nullptr);
     configure_filter(config);
 
     if (!drakvuf_get_kernel_struct_members_array_rva(drakvuf, linux_offset_names, this->offsets.size(), this->offsets.data()))

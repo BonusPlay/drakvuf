@@ -118,7 +118,7 @@ OUTPUTFOLDER=$7
 MD5=$(md5sum $RUNFOLDER/$RUNFILE | awk -F" " '{print $1}')
 CMD="C:\\Users\\MrX\\Desktop\\test.exe"
 
-drakvuf -r $REKALL -d $DOMAIN -i $PID -e "$CMD" -D $OUTPUTFOLDER/$MD5 -o csv -t 60 1>$OUTPUTFOLDER/$MD5/drakvuf.log 2>&1
+drakvuf -r $REKALL -d $DOMAIN -i $PID -e "$CMD" -D $OUTPUTFOLDER/$MD5 -o json -t 60 1>$OUTPUTFOLDER/$MD5/drakvuf.log
 
 RET=$?
 

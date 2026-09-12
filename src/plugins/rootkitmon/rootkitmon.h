@@ -118,7 +118,7 @@ struct rootkitmon_config
 class rootkitmon : public pluginex
 {
 public:
-    rootkitmon(drakvuf_t drakvuf, const rootkitmon_config* config, output_format_t output);
+    rootkitmon(drakvuf_t drakvuf, const rootkitmon_config* config);
     rootkitmon(const rootkitmon&) = delete;
     rootkitmon& operator=(const rootkitmon&) = delete;
     ~rootkitmon() = default;
@@ -145,7 +145,6 @@ public:
 
     virtual bool stop_impl() override;
 
-    const output_format_t format;
     win_ver_t winver;
 
     std::array<size_t, rootkitmon_ns::__OFFSET_MAX> offsets;
@@ -171,7 +170,7 @@ public:
     bool do_flt_checks;
     // map of volumes and their callbacks
     std::unordered_map<uint64_t, rootkitmon_ns::callback_ctl_t> flt_callbacks;
-    std::unordered_map<rootkitmon_ns::driver_t, std::pair<rootkitmon_ns::sha256_checksum_t, std::string>> driver_sections_checksums;
+    std::unordered_map<rootkitmon_ns::driver_t, std::pair<rootkitmon_ns::sha256_checksum_t, slog::value>> driver_sections_checksums;
     std::unordered_map<rootkitmon_ns::driver_t, rootkitmon_ns::sha256_checksum_t> driver_object_checksums;
     // _DRIVER_OBJECT -> _DEVICE_OBJECT -> [_DEVICE_OBJECT, ...]
     std::unordered_map<rootkitmon_ns::driver_t, rootkitmon_ns::device_stack_t> driver_stacks;

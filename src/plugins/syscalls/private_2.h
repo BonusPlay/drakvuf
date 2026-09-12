@@ -109,7 +109,7 @@
 
 #include "plugins/plugin_utils.h"
 #include "plugins/plugins_ex.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 
 #include "private.h"
 
@@ -131,10 +131,10 @@ public:
     bool disable_sysret;
 
     std::unordered_set<std::string> filter;
-    std::vector<std::pair<char const*, fmt::Aarg>> fmt_args;
 
     void print_sysret(drakvuf_t drakvuf, drakvuf_trap_info_t* info, int nr, const char* extra_info = nullptr);
-    std::string parse_argument(drakvuf_t drakvuf, drakvuf_trap_info_t* info, const syscalls_ns::arg_t& arg, addr_t val);
+    std::optional<slog::value> parse_argument(drakvuf_t drakvuf, drakvuf_trap_info_t* info,
+        const syscalls_ns::arg_t& arg, addr_t val);
     uint64_t mask_value(const syscalls_ns::arg_t& arg, uint64_t val);
     uint64_t transform_value(drakvuf_t drakvuf, drakvuf_trap_info_t* info, const syscalls_ns::arg_t& arg, uint64_t val);
     bool read_syscalls_filter(const char* filter_file);
@@ -144,7 +144,7 @@ public:
         return NULL;
     }
 
-    syscalls_base(drakvuf_t drakvuf, const syscalls_config* config, output_format_t output);
+    syscalls_base(drakvuf_t drakvuf, const syscalls_config* config);
     syscalls_base(const syscalls_base&) = delete;
     syscalls_base& operator=(const syscalls_base&) = delete;
 };

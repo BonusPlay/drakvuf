@@ -107,11 +107,11 @@
 #include "linux.h"
 #include "win.h"
 
-procdump2::procdump2(drakvuf_t drakvuf, const procdump2_config* config, output_format_t output) : pluginex(drakvuf, output)
+procdump2::procdump2(drakvuf_t drakvuf, const procdump2_config* config) : pluginex(drakvuf)
 {
     auto os = drakvuf_get_os_type(drakvuf);
     if (os == VMI_OS_WINDOWS)
-        this->wp = std::make_unique<win_procdump2>(drakvuf, config, output);
+        this->wp = std::make_unique<win_procdump2>(drakvuf, config);
     else
-        this->lp = std::make_unique<linux_procdump>(drakvuf, config, output);
+        this->lp = std::make_unique<linux_procdump>(drakvuf, config);
 }

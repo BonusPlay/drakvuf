@@ -187,37 +187,6 @@ void dump_registers(const x86_registers_t* regs, string header, string footer)
     );
 }
 
-static std::string format_flag(string flag, output_format_t format)
-{
-    if ( format == OUTPUT_KV )
-        return flag + "=1,";
-
-    return flag + " | ";
-}
-
-std::string parse_flags(uint64_t flags, const flags_str_t& flags_map, output_format_t format, std::string empty)
-{
-    string output;
-
-    for (const auto& flag: flags_map)
-        if ((flag.first & flags) == flag.first)
-            output += format_flag(flag.second, format);
-
-    if (output.empty())
-    {
-        output = empty;
-    }
-    else
-    {
-        if (format == OUTPUT_KV)
-            output.resize(output.size() - 1);
-        else
-            output.resize(output.size() - 3);
-    }
-
-    return output;
-}
-
 std::string parse_enum(uint64_t value, const flags_str_t& enum_map)
 {
     auto it = enum_map.find(value);

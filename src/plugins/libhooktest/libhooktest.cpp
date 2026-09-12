@@ -126,8 +126,8 @@ event_response_t libhooktest::protectVirtualMemoryRetCb(drakvuf_t drakvuf, drakv
     return VMI_EVENT_RESPONSE_NONE;
 }
 
-libhooktest::libhooktest(drakvuf_t drakvuf, output_format_t output)
-    : pluginex(drakvuf, output)
+libhooktest::libhooktest(drakvuf_t drakvuf)
+    : pluginex(drakvuf)
 {
     PRINT_DEBUG("[LIBHOOKTEST] works\n");
 

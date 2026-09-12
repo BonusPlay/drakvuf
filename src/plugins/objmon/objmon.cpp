@@ -116,7 +116,7 @@
 #include <err.h>
 
 #include "plugins/plugins.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 
 #include "objmon.h"
 
@@ -171,14 +171,14 @@ static event_response_t ntduplicateobject_ret_cb(drakvuf_t drakvuf, drakvuf_trap
         return VMI_EVENT_RESPONSE_NONE;
     }
 
-    fmt::print(plugin->format, "objmon", drakvuf, info,
-        keyval("SourceProcessHandle", fmt::Xval(params->source_process_handle)),
-        keyval("SourceHandle", fmt::Xval(params->source_handle)),
-        keyval("TargetProcessHandle", fmt::Xval(params->target_process_handle)),
-        keyval("TargetHandle", fmt::Xval(target_handle)),
-        keyval("DesiredAccess", fmt::Xval(params->desired_access)),
-        keyval("HandleAttributes", fmt::Xval(params->handle_attributes)),
-        keyval("Options", fmt::Xval(params->options))
+    slog::emit("objmon", drakvuf, info,
+        slog::attr("SourceProcessHandle", slog::hex(params->source_process_handle)),
+        slog::attr("SourceHandle", slog::hex(params->source_handle)),
+        slog::attr("TargetProcessHandle", slog::hex(params->target_process_handle)),
+        slog::attr("TargetHandle", slog::hex(target_handle)),
+        slog::attr("DesiredAccess", slog::hex(params->desired_access)),
+        slog::attr("HandleAttributes", slog::hex(params->handle_attributes)),
+        slog::attr("Options", slog::hex(params->options))
     );
 
     //Destroys this return trap, because it is specific for the RIP and not usable anymore. This was the trap being called when the physical address got computed.
@@ -278,8 +278,8 @@ static event_response_t obcreateobject_cb(drakvuf_t drakvuf, drakvuf_trap_info_t
 
     auto key = std::string(ckey._key, 4);
 
-    fmt::print(o->format, "objmon", drakvuf, info,
-        keyval("Key", fmt::Qstr(key))
+    slog::emit("objmon", drakvuf, info,
+        slog::attr("Key", slog::text(key))
     );
 
     return 0;
@@ -287,9 +287,8 @@ static event_response_t obcreateobject_cb(drakvuf_t drakvuf, drakvuf_trap_info_t
 
 /* ----------------------------------------------------- */
 
-objmon::objmon(drakvuf_t drakvuf, const objmon_config* config, output_format_t output)
-    : pluginex(drakvuf, output)
-    , format(output)
+objmon::objmon(drakvuf_t drakvuf, const objmon_config* config)
+    : pluginex(drakvuf)
 {
     breakpoint_in_system_process_searcher bp;
 

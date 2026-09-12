@@ -120,7 +120,7 @@ struct envmon_config
 class envmon: public pluginex
 {
 public:
-    envmon(drakvuf_t drakvuf, const envmon_config* config, output_format_t output);
+    envmon(drakvuf_t drakvuf, const envmon_config* config);
 };
 
 #endif

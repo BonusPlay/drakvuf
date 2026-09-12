@@ -116,7 +116,7 @@
 #include <err.h>
 
 #include "plugins/plugins.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 #include "private.h"
 #include "cpuidmon.h"
 
@@ -125,15 +125,13 @@ event_response_t cpuid_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
 
     cpuidmon* s = (cpuidmon*)info->trap->data;
 
-    fmt::print(s->format, "cpuidmon", drakvuf, info,
-        keyval("VCPU", fmt::Nval(info->vcpu)),
-        keyval("CR3", fmt::Nval(info->regs->cr3)),
-        keyval("Leaf", fmt::Xval(info->cpuid->leaf)),
-        keyval("Subleaf", fmt::Xval(info->cpuid->subleaf)),
-        keyval("RAX", fmt::Xval(info->regs->rax)),
-        keyval("RBX", fmt::Xval(info->regs->rbx)),
-        keyval("RCX", fmt::Xval(info->regs->rcx)),
-        keyval("RDX", fmt::Xval(info->regs->rdx))
+    slog::emit("cpuidmon", drakvuf, info,
+        slog::attr("Leaf", slog::hex(info->cpuid->leaf)),
+        slog::attr("Subleaf", slog::hex(info->cpuid->subleaf)),
+        slog::attr("RAX", slog::hex(info->regs->rax)),
+        slog::attr("RBX", slog::hex(info->regs->rbx)),
+        slog::attr("RCX", slog::hex(info->regs->rcx)),
+        slog::attr("RDX", slog::hex(info->regs->rdx))
     );
 
     if ( s->stealth )
@@ -157,9 +155,8 @@ event_response_t cpuid_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
 
 /* ----------------------------------------------------- */
 
-cpuidmon::cpuidmon(drakvuf_t _drakvuf, bool _stealth, output_format_t _output)
-    : format{_output}
-    , drakvuf{_drakvuf}
+cpuidmon::cpuidmon(drakvuf_t _drakvuf, bool _stealth)
+    : drakvuf{_drakvuf}
     , stealth{_stealth}
 {
     this->cpuid.cb = cpuid_cb;

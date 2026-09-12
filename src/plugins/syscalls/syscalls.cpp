@@ -118,17 +118,16 @@ using namespace syscalls_ns;
 
 void syscalls_base::print_sysret(drakvuf_t drakvuf, drakvuf_trap_info_t* info, int nr, const char* extra_info)
 {
-    fmt::print(this->m_output_format, "sysret", drakvuf, info,
-        keyval("Module", fmt::Qstr(std::move(info->trap->breakpoint.module))),
-        keyval("vCPU", fmt::Nval(info->vcpu)),
-        keyval("CR3", fmt::Xval(info->regs->cr3)),
-        keyval("Syscall", fmt::Nval(nr)),
-        keyval("Ret", fmt::Xval(info->regs->rax)),
-        keyval("Info", fmt::Rstr(extra_info ?: ""))
+    slog::emit("sysret", drakvuf, info,
+        slog::attr("Module", slog::text(std::move(info->trap->breakpoint.module))),
+        slog::attr("Syscall", slog::number(nr)),
+        slog::attr("Ret", slog::hex(info->regs->rax)),
+        slog::attr("Info", slog::text(extra_info))
     );
 }
 
-std::string syscalls_base::parse_argument(drakvuf_t drakvuf, drakvuf_trap_info_t* info, const arg_t& arg, addr_t val)
+std::optional<slog::value> syscalls_base::parse_argument(drakvuf_t drakvuf, drakvuf_trap_info_t* info,
+    const arg_t& arg, addr_t val)
 {
     char* cstr = nullptr;
 
@@ -138,13 +137,9 @@ std::string syscalls_base::parse_argument(drakvuf_t drakvuf, drakvuf_trap_info_t
         {
             case PUNICODE_STRING:
             {
-                unicode_string_t* us = drakvuf_read_unicode(drakvuf, info, val);
-                if ( us )
-                {
-                    cstr = (char*)us->contents;
-                    us->contents = nullptr;
-                    vmi_free_unicode_str(us);
-                }
+                unicode_string us(drakvuf_read_unicode(drakvuf, info, val));
+                if (us.get() && us.get()->contents && us.get()->length)
+                    return slog::value(us);
                 break;
             }
             case PCHAR:
@@ -153,7 +148,7 @@ std::string syscalls_base::parse_argument(drakvuf_t drakvuf, drakvuf_trap_info_t
                 break;
             case linux_intmask_prot_:
                 // PROT_NONE == 0, so incorrect for parsing flags
-                return val == 0 ? "PROT_NONE" : parse_flags(val, mmap_prot, m_output_format);
+                return slog::flags(val, mmap_prot);
             case linux_intopt_pr_:
                 return prctl_option.find(val) != prctl_option.end() ? prctl_option.at(val) : std::to_string(val);
             case linux_intopt_arch_:
@@ -169,7 +164,8 @@ std::string syscalls_base::parse_argument(drakvuf_t drakvuf, drakvuf_trap_info_t
     {
         std::string str = std::string(cstr);
         g_free(cstr);
-        return str;
+        if (!str.empty())
+            return slog::text(std::move(str));
     }
     return {};
 }
@@ -245,7 +241,7 @@ bool syscalls_base::read_syscalls_filter(const char* filter_file)
 }
 
 
-syscalls_base::syscalls_base(drakvuf_t drakvuf, const syscalls_config* config, output_format_t output) : pluginex(drakvuf, output)
+syscalls_base::syscalls_base(drakvuf_t drakvuf, const syscalls_config* config) : pluginex(drakvuf)
 {
     this->os = drakvuf_get_os_type(drakvuf);
     this->kernel_base = drakvuf_get_kernel_base(drakvuf);
@@ -257,11 +253,11 @@ syscalls_base::syscalls_base(drakvuf_t drakvuf, const syscalls_config* config, o
         throw -1;
 }
 
-syscalls::syscalls(drakvuf_t drakvuf, const syscalls_config* config, output_format_t output) : pluginex(drakvuf, output)
+syscalls::syscalls(drakvuf_t drakvuf, const syscalls_config* config) : pluginex(drakvuf)
 {
     os_t os = drakvuf_get_os_type(drakvuf);
     if (os == VMI_OS_WINDOWS)
-        this->_win_syscalls = std::make_unique<win_syscalls>(drakvuf, config, output);
+        this->_win_syscalls = std::make_unique<win_syscalls>(drakvuf, config);
     else
-        this->_linux_syscalls = std::make_unique<linux_syscalls>(drakvuf, config, output);
+        this->_linux_syscalls = std::make_unique<linux_syscalls>(drakvuf, config);
 }

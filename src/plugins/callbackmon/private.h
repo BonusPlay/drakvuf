@@ -103,6 +103,8 @@
  ***************************************************************************/
 #pragma once
 
+#include "plugins/helpers/unicode_string.h"
+
 namespace callbackmon_ns
 {
 struct type_cb_t
@@ -125,13 +127,14 @@ struct callbackmon_module_t
 {
     addr_t base;
     size_t size;
-    std::string name;
+    // Decoded on capture; the guest string belongs to libdrakvuf.
+    slog::value name;
 };
 
 struct object_type_t
 {
     addr_t base;
-    std::string name;
+    unicode_string name;
     std::vector<type_cb_t> callbacks;
     std::vector<addr_t> initializer;
 };
@@ -139,7 +142,7 @@ struct object_type_t
 struct object_t
 {
     addr_t base;
-    std::string name;
+    unicode_string name;
     std::vector<addr_t> callbacks;
 };
 

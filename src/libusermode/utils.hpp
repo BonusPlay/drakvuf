@@ -107,7 +107,8 @@
 #include <string>
 #include <sstream>
 #include <vector>
-#include <memory>
+#include <utility>
+#include "arguments.hpp"
 
 bool is_dll_name_matched(const std::string& dll_name, const std::string& pattern);
 
@@ -140,9 +141,6 @@ struct HookActions
     }
 };
 
-class ArgumentPrinter;
-struct PrinterConfig;
-
 struct plugin_target_config_entry_t
 {
     std::string dll_name;
@@ -152,19 +150,19 @@ struct plugin_target_config_entry_t
     uint64_t offset;
     bool no_retval{false};
     HookActions actions;
-    std::vector<std::unique_ptr<ArgumentPrinter>> argument_printers;
+    std::vector<argument_spec> arguments;
 
     plugin_target_config_entry_t()
-        : dll_name(), type(), function_name(), offset(), actions(), argument_printers()
+        : dll_name(), type(), function_name(), offset(), actions(), arguments()
     {}
 
-    plugin_target_config_entry_t(std::string dll_name, std::string function_name, uint64_t offset, HookActions hook_actions, std::vector<std::unique_ptr<ArgumentPrinter>> argument_printers)
-        : dll_name(std::move(dll_name)), type(HOOK_BY_OFFSET), function_name(std::move(function_name)), offset(offset), actions(hook_actions), argument_printers(std::move(argument_printers))
+    plugin_target_config_entry_t(std::string dll_name, std::string function_name, uint64_t offset, HookActions hook_actions, std::vector<argument_spec> arguments)
+        : dll_name(std::move(dll_name)), type(HOOK_BY_OFFSET), function_name(std::move(function_name)), offset(offset), actions(hook_actions), arguments(std::move(arguments))
     {}
 
-    plugin_target_config_entry_t(std::string dll_name, std::string function_name, HookActions hook_actions, std::vector<std::unique_ptr<ArgumentPrinter>> argument_printers)
-        : dll_name(std::move(dll_name)), type(HOOK_BY_NAME), function_name(std::move(function_name)), offset(), actions(hook_actions), argument_printers(std::move(argument_printers))
+    plugin_target_config_entry_t(std::string dll_name, std::string function_name, HookActions hook_actions, std::vector<argument_spec> arguments)
+        : dll_name(std::move(dll_name)), type(HOOK_BY_NAME), function_name(std::move(function_name)), offset(), actions(hook_actions), arguments(std::move(arguments))
     {}
 };
 
-plugin_target_config_entry_t parse_entry(std::stringstream& ss, PrinterConfig& config);
+plugin_target_config_entry_t parse_entry(std::stringstream& ss, const argument_options& config);

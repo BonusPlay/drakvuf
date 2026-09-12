@@ -119,7 +119,7 @@
 class win_procdump2 : public pluginex
 {
 public:
-    win_procdump2(drakvuf_t drakvuf, const procdump2_config* config, output_format_t output);
+    win_procdump2(drakvuf_t drakvuf, const procdump2_config* config);
     ~win_procdump2();
     virtual bool stop_impl() override;
 
@@ -257,7 +257,7 @@ private:
     bool dispatch_pending_suspend(drakvuf_trap_info_t*,
         std::shared_ptr<procdump2_ns::win_procdump2_ctx>);
     bool dispatch_new_get_target_info(drakvuf_trap_info_t*,
-        addr_t& target_process_base, std::string& target_process_name,
+        addr_t& target_process_base, std::optional<std::string>& target_process_name,
         vmi_pid_t& target_process_pid, bool& is_hosted);
     void dispatch_new_do_suspend(drakvuf_trap_info_t*,
         std::shared_ptr<procdump2_ns::win_procdump2_ctx>,

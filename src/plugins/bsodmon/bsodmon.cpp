@@ -105,17 +105,11 @@
 #include <sys/stat.h>
 #include <libdrakvuf/libdrakvuf.h>
 
+#include <format>
 #include "bsodmon.h"
 #include "private.h"
 #include "bugcheck.h"
-#include "plugins/output_format.h"
-
-static std::string to_hex_string(uint64_t value)
-{
-    std::stringstream stream;
-    stream << std::hex << value;
-    return stream.str();
-}
+#include "slog/slog.hpp"
 
 static void save_file_metadata(
     drakvuf_t drakvuf,
@@ -128,58 +122,24 @@ static void save_file_metadata(
     uint64_t param4)
 {
     // TODO Add option
-    auto file = f->crashdump_dir + "/crashdump.metadata";
+    auto file = std::format("{}/crashdump.metadata", f->crashdump_dir);
     if (file.empty())
         return;
 
-    umask(S_IWGRP | S_IWOTH);
-    FILE* fp = fopen(file.data(), "w");
-    if (!fp)
-        return;
-
-    json_object* jobj = json_object_new_object();
-    if (!jobj)
+    slog::keyval_array record
     {
-        fclose(fp);
-        return;
-    }
+        slog::attr("KernelBase", slog::hex(drakvuf_get_kernel_base(drakvuf))),
+        slog::attr("BugCheckCode", slog::hex(code)),
+        slog::attr("Param1", slog::hex(param1)),
+        slog::attr("Param2", slog::hex(param2)),
+        slog::attr("Param3", slog::hex(param3)),
+        slog::attr("Param4", slog::hex(param4)),
+        slog::attr("CR3", slog::hex(info->regs->cr3)),
+        slog::attr("RSP", slog::hex(info->regs->rsp))
+    };
 
-    json_object_object_add(jobj,
-        "KernelBase",
-        json_object_new_string(to_hex_string(drakvuf_get_kernel_base(drakvuf)).data()));
-
-    json_object_object_add(jobj,
-        "BugCheckCode",
-        json_object_new_string(to_hex_string(code).data()));
-
-    json_object_object_add(jobj,
-        "Param1",
-        json_object_new_string(to_hex_string(param1).data()));
-
-    json_object_object_add(jobj,
-        "Param2",
-        json_object_new_string(to_hex_string(param2).data()));
-
-    json_object_object_add(jobj,
-        "Param3",
-        json_object_new_string(to_hex_string(param3).data()));
-
-    json_object_object_add(jobj,
-        "Param4",
-        json_object_new_string(to_hex_string(param4).data()));
-
-    json_object_object_add(jobj,
-        "CR3",
-        json_object_new_string(to_hex_string(info->regs->cr3).data()));
-
-    json_object_object_add(jobj,
-        "RSP",
-        json_object_new_string(to_hex_string(info->regs->rsp).data()));
-
-    fprintf(fp, "%s\n", json_object_get_string(jobj));
-    fclose(fp);
-
-    json_object_put(jobj);
+    if (!slog::write_record(file, record))
+        PRINT_DEBUG("[BSODMON] Failed to write crashdump metadata file\n");
 }
 
 static void dump_system(
@@ -194,7 +154,7 @@ static void dump_system(
 {
     save_file_metadata(drakvuf, info, f, code, param1, param2, param3, param4);
 
-    auto file = f->crashdump_dir + "/crashdump.bin";
+    auto file = std::format("{}/crashdump.bin", f->crashdump_dir);
     if (file.empty())
         return;
 
@@ -233,20 +193,14 @@ static event_response_t hook_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
     if ( f->bugcheck_map.find( code ) != f->bugcheck_map.end() )
         bugcheck_name = f->bugcheck_map[ code ];
 
-    {
-        auto tuple = std::make_tuple(
-                keyval("VCPU", fmt::Nval(info->vcpu)),
-                keyval("CR3", fmt::Nval(info->regs->cr3)),
-                keyval("BugCheckCode", fmt::Xval(code, false)),
-                keyval("BugCheckName", fmt::Qstr(bugcheck_name)),
-                keyval("BugCheckParameter1", fmt::Xval(param1, false)),
-                keyval("BugCheckParameter2", fmt::Xval(param2, false)),
-                keyval("BugCheckParameter3", fmt::Xval(param3, false)),
-                keyval("BugCheckParameter4", fmt::Xval(param4, false))
-            );
-
-        fmt::print(f->format, "bsodmon", drakvuf, info, tuple);
-    }
+    slog::emit("bsodmon", drakvuf, info,
+        slog::attr("BugCheckCode", slog::hex(code)),
+        slog::attr("BugCheckName", slog::text(bugcheck_name)),
+        slog::attr("BugCheckParameter1", slog::hex(param1)),
+        slog::attr("BugCheckParameter2", slog::hex(param2)),
+        slog::attr("BugCheckParameter3", slog::hex(param3)),
+        slog::attr("BugCheckParameter4", slog::hex(param4))
+    );
 
     if (!f->crashdump_dir.empty())
         dump_system(drakvuf, info, f, code, param1, param2, param3, param4);
@@ -257,9 +211,8 @@ static event_response_t hook_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
     return 0;
 }
 
-bsodmon::bsodmon(drakvuf_t drakvuf, bool _abort_on_bsod, const char* _crashdump_dir, output_format_t output)
+bsodmon::bsodmon(drakvuf_t drakvuf, bool _abort_on_bsod, const char* _crashdump_dir)
     : drakvuf{drakvuf}
-    , format{output}
     , abort_on_bsod{_abort_on_bsod}
 {
     if (_crashdump_dir)

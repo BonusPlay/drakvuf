@@ -132,7 +132,7 @@
 #include <cassert>
 
 #include "plugins/plugins.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 
 #include "private.h"
 #include "socketmon.h"
@@ -361,32 +361,32 @@ static char const* tcp_addressfamily_string(int family)
 
 static void print_udp_info(drakvuf_t drakvuf, drakvuf_trap_info_t* info, socketmon* s, proc_data_t const& owner_proc_data, int addressfamily, char const* lip, int localport, char const* rip, int remoteport)
 {
-    fmt::print(s->format, "socketmon", drakvuf, info,
-        keyval("Owner", fmt::Estr(owner_proc_data.name)),
-        keyval("OwnerId", fmt::Nval(owner_proc_data.userid)),
-        keyval("OwnerPID", fmt::Nval(owner_proc_data.pid)),
-        keyval("OwnerPPID", fmt::Nval(owner_proc_data.ppid)),
-        keyval("Protocol", fmt::Rstr(udp_addressfamily_string(addressfamily))),
-        keyval("RemoteIp", fmt::Rstr(rip ?: "")),
-        keyval("RemotePort", fmt::Nval(remoteport)),
-        keyval("LocalIp", fmt::Rstr(lip ?: "")),
-        keyval("LocalPort", fmt::Nval(localport))
+    slog::emit("socketmon", drakvuf, info,
+        slog::attr("Owner", slog::text(owner_proc_data.name)),
+        slog::attr("OwnerId", slog::number(owner_proc_data.userid)),
+        slog::attr("OwnerPID", slog::number(owner_proc_data.pid)),
+        slog::attr("OwnerPPID", slog::number(owner_proc_data.ppid)),
+        slog::attr("Protocol", slog::text(udp_addressfamily_string(addressfamily))),
+        slog::attr("RemoteIp", slog::text(rip)),
+        slog::attr("RemotePort", slog::number(remoteport)),
+        slog::attr("LocalIp", slog::text(lip)),
+        slog::attr("LocalPort", slog::number(localport))
     );
 }
 
 static void print_tcpe(drakvuf_t drakvuf, drakvuf_trap_info_t* info, socketmon* s, proc_data_t const& owner_proc_data,
     int addressfamily, char const* lip, int localport, char const* rip, int remoteport)
 {
-    fmt::print(s->format, "socketmon", drakvuf, info,
-        keyval("Owner", fmt::Estr(owner_proc_data.name)),
-        keyval("OwnerId", fmt::Nval(owner_proc_data.userid)),
-        keyval("OwnerPID", fmt::Nval(owner_proc_data.pid)),
-        keyval("OwnerPPID", fmt::Nval(owner_proc_data.ppid)),
-        keyval("Protocol", fmt::Rstr(tcp_addressfamily_string(addressfamily))),
-        keyval("LocalIp", fmt::Rstr(lip ?: "")),
-        keyval("LocalPort", fmt::Nval(localport)),
-        keyval("RemoteIp", fmt::Rstr(rip ?: "")),
-        keyval("RemotePort", fmt::Nval(remoteport))
+    slog::emit("socketmon", drakvuf, info,
+        slog::attr("Owner", slog::text(owner_proc_data.name)),
+        slog::attr("OwnerId", slog::number(owner_proc_data.userid)),
+        slog::attr("OwnerPID", slog::number(owner_proc_data.pid)),
+        slog::attr("OwnerPPID", slog::number(owner_proc_data.ppid)),
+        slog::attr("Protocol", slog::text(tcp_addressfamily_string(addressfamily))),
+        slog::attr("LocalIp", slog::text(lip)),
+        slog::attr("LocalPort", slog::number(localport)),
+        slog::attr("RemoteIp", slog::text(rip)),
+        slog::attr("RemotePort", slog::number(remoteport))
     );
 }
 
@@ -670,10 +670,11 @@ static event_response_t udp_send_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info
 
 /* ----------------------------------------------------- */
 
-static void print_dns_info(drakvuf_t drakvuf, drakvuf_trap_info_t* info, socketmon* sm, const char* dns_name)
+static void print_dns_info(drakvuf_t drakvuf, drakvuf_trap_info_t* info,
+    socketmon* sm, slog::value dns_name)
 {
-    fmt::print(sm->format, "socketmon", drakvuf, info,
-        keyval("DnsName", fmt::Estr(dns_name ?: ""))
+    slog::emit("socketmon", drakvuf, info,
+        slog::attr("DnsName", std::move(dns_name))
     );
 }
 
@@ -686,7 +687,7 @@ static event_response_t trap_DnsQuery_A_cb(drakvuf_t drakvuf, drakvuf_trap_info_
 
     char* dns_name = drakvuf_read_ascii_str(drakvuf, info, domain_name_addr);
 
-    print_dns_info(drakvuf, info, sm, dns_name);
+    print_dns_info(drakvuf, info, sm, slog::text(dns_name));
     g_free(dns_name);
 
     return 0;
@@ -712,7 +713,7 @@ static event_response_t trap_DnsQuery_W_cb(drakvuf_t drakvuf, drakvuf_trap_info_
 
     if (domain_name_us)
     {
-        print_dns_info(drakvuf, info, sm, (char*)domain_name_us->contents);
+        print_dns_info(drakvuf, info, sm, slog::value(domain_name_us));
     }
     else
     {
@@ -757,7 +758,7 @@ static event_response_t trap_DnsQueryExW_impl(drakvuf_t drakvuf, drakvuf_trap_in
 
     if (domain_name_us)
     {
-        print_dns_info(drakvuf, info, sm, (char*)domain_name_us->contents);
+        print_dns_info(drakvuf, info, sm, slog::value(domain_name_us));
     }
     else
     {
@@ -789,7 +790,7 @@ static event_response_t trap_DnsQueryExA_cb(drakvuf_t drakvuf, drakvuf_trap_info
 
     char* dns_name = drakvuf_read_ascii_str(drakvuf, info, domain_name_addr);
 
-    print_dns_info(drakvuf, info, sm, dns_name);
+    print_dns_info(drakvuf, info, sm, slog::text(dns_name));
     g_free(dns_name);
 
     return 0;
@@ -825,7 +826,7 @@ static event_response_t trap_DnsQueryEx_cb(drakvuf_t drakvuf, drakvuf_trap_info_
 
     if (domain_name_us)
     {
-        print_dns_info(drakvuf, info, sm, (const char*)domain_name_us->contents);
+        print_dns_info(drakvuf, info, sm, slog::value(domain_name_us));
     }
     else
     {
@@ -908,9 +909,8 @@ static void on_dll_hooked(drakvuf_t drakvuf, const dll_view_t* dll, const std::v
     PRINT_DEBUG("[SOCKETMON] DLL hooked - done\n");
 }
 
-socketmon::socketmon(drakvuf_t drakvuf_, const socketmon_config* c, output_format_t output)
-    : format{output}
-    , drakvuf{drakvuf_}
+socketmon::socketmon(drakvuf_t drakvuf_, const socketmon_config* c)
+    : drakvuf{drakvuf_}
 {
     if (!drakvuf_are_userhooks_supported(drakvuf))
     {
@@ -939,19 +939,19 @@ socketmon::socketmon(drakvuf_t drakvuf_, const socketmon_config* c, output_forma
 
     const auto log = HookActions::empty();
 
-    wanted_hooks.add_hook(plugin_target_config_entry_t ("dnsapi.dll", "DnsQuery_W", log, std::vector<std::unique_ptr<ArgumentPrinter>>()));
-    wanted_hooks.add_hook(plugin_target_config_entry_t ("dnsapi.dll", "DnsQuery_A", log, std::vector<std::unique_ptr<ArgumentPrinter>>()));
-    wanted_hooks.add_hook(plugin_target_config_entry_t ("dnsapi.dll", "DnsQuery_UTF8", log, std::vector<std::unique_ptr<ArgumentPrinter>>()));
+    wanted_hooks.add_hook(plugin_target_config_entry_t ("dnsapi.dll", "DnsQuery_W", log, std::vector<argument_spec>()));
+    wanted_hooks.add_hook(plugin_target_config_entry_t ("dnsapi.dll", "DnsQuery_A", log, std::vector<argument_spec>()));
+    wanted_hooks.add_hook(plugin_target_config_entry_t ("dnsapi.dll", "DnsQuery_UTF8", log, std::vector<argument_spec>()));
 
     if (this->build.version == VMI_OS_WINDOWS_7)
     {
-        wanted_hooks.add_hook(plugin_target_config_entry_t("dnsapi.dll", "DnsQueryExW", log, std::vector<std::unique_ptr<ArgumentPrinter>>()));
-        wanted_hooks.add_hook(plugin_target_config_entry_t("dnsapi.dll", "DnsQueryA", log, std::vector<std::unique_ptr<ArgumentPrinter>>()));
+        wanted_hooks.add_hook(plugin_target_config_entry_t("dnsapi.dll", "DnsQueryExW", log, std::vector<argument_spec>()));
+        wanted_hooks.add_hook(plugin_target_config_entry_t("dnsapi.dll", "DnsQueryA", log, std::vector<argument_spec>()));
     }
 
     if (this->build.version >= VMI_OS_WINDOWS_8)
     {
-        wanted_hooks.add_hook(plugin_target_config_entry_t("dnsapi.dll", "DnsQueryEx", log, std::vector<std::unique_ptr<ArgumentPrinter>>()));
+        wanted_hooks.add_hook(plugin_target_config_entry_t("dnsapi.dll", "DnsQueryEx", log, std::vector<argument_spec>()));
     }
 
     usermode_cb_registration reg =

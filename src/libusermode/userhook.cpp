@@ -837,9 +837,9 @@ void userhook::request_usermode_hook(drakvuf_t drakvuf, const dll_view_t* dll, c
     dll_t* p_dll = reinterpret_cast<dll_t*>(const_cast<dll_view_t*>(dll));
 
     if (target->type == HOOK_BY_NAME)
-        p_dll->targets.emplace_back(target->function_name, target->clsid, target->no_retval, callback, target->argument_printers, extra);
+        p_dll->targets.emplace_back(target->function_name, target->clsid, target->no_retval, callback, target->arguments, extra);
     else // HOOK_BY_OFFSET
-        p_dll->targets.emplace_back(target->function_name, target->clsid, target->offset, target->no_retval, callback, target->argument_printers, extra);
+        p_dll->targets.emplace_back(target->function_name, target->clsid, target->offset, target->no_retval, callback, target->arguments, extra);
 }
 
 void userhook::register_plugin(drakvuf_t drakvuf, usermode_cb_registration reg)
@@ -872,7 +872,7 @@ bool userhook::is_supported(drakvuf_t drakvuf)
     return true;
 }
 
-userhook::userhook(drakvuf_t drakvuf, bool injection_mode_enabled): pluginex(drakvuf, OUTPUT_DEFAULT), injection_mode(injection_mode_enabled)
+userhook::userhook(drakvuf_t drakvuf, bool injection_mode_enabled): pluginex(drakvuf), injection_mode(injection_mode_enabled)
 {
     if (!is_supported(drakvuf))
         throw -1;
@@ -991,21 +991,23 @@ bool drakvuf_stop_userhooks(drakvuf_t drakvuf)
 
 void drakvuf_load_dll_hook_config(drakvuf_t drakvuf, const char* dll_hooks_list_path, bool print_no_addr, const hook_filter_t& hook_filter, wanted_hooks_t& wanted_hooks)
 {
-    PrinterConfig config{};
-    config.print_no_addr = print_no_addr;
+    argument_options config{};
+    config.omit_address = print_no_addr;
 
     if (!dll_hooks_list_path)
     {
         const auto log_and_stack = HookActions::empty().set_log().set_stack();
         // if the DLL hook list was not provided, we provide some simple defaults
-        std::vector<std::unique_ptr<ArgumentPrinter>> arg_vec1;
-        arg_vec1.push_back(std::make_unique<ArgumentPrinter>("wVersionRequired", config));
-        arg_vec1.push_back(std::make_unique<ArgumentPrinter>("lpWSAData", config));
+        std::vector<argument_spec> arg_vec1{
+            {"wVersionRequired", argument_kind::number, config},
+            {"lpWSAData", argument_kind::number, config},
+        };
         plugin_target_config_entry_t e1("ws2_32.dll", "WSAStartup", log_and_stack, std::move(arg_vec1));
 
-        std::vector<std::unique_ptr<ArgumentPrinter>> arg_vec2;
-        arg_vec2.push_back(std::make_unique<ArgumentPrinter>("ExitCode", config));
-        arg_vec2.push_back(std::make_unique<ArgumentPrinter>("Unknown", config));
+        std::vector<argument_spec> arg_vec2{
+            {"ExitCode", argument_kind::number, config},
+            {"Unknown", argument_kind::number, config},
+        };
         plugin_target_config_entry_t e2("ntdll.dll", "RtlExitUserProcess", log_and_stack, std::move(arg_vec2));
 
         if (!hook_filter(e1)) wanted_hooks.add_hook(std::move(e1));

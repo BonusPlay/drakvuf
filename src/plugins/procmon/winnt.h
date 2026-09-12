@@ -108,6 +108,8 @@
 #include <inttypes.h>
 #include <string>
 
+#include "plugins/plugin_utils.h"
+
 enum page_access_t
 {
     PAGE_NOACCESS          = 0x01,
@@ -121,6 +123,21 @@ enum page_access_t
     PAGE_GUARD             = 0x100,
     PAGE_NOCACHE           = 0x200,
     PAGE_WRITECOMBINE      = 0x400,
+};
+
+static const flags_str_t page_protection_flags =
+{
+    REGISTER_FLAG(PAGE_NOACCESS),
+    REGISTER_FLAG(PAGE_READONLY),
+    REGISTER_FLAG(PAGE_READWRITE),
+    REGISTER_FLAG(PAGE_WRITECOPY),
+    REGISTER_FLAG(PAGE_EXECUTE),
+    REGISTER_FLAG(PAGE_EXECUTE_READ),
+    REGISTER_FLAG(PAGE_EXECUTE_READWRITE),
+    REGISTER_FLAG(PAGE_EXECUTE_WRITECOPY),
+    REGISTER_FLAG(PAGE_GUARD),
+    REGISTER_FLAG(PAGE_NOCACHE),
+    REGISTER_FLAG(PAGE_WRITECOMBINE),
 };
 
 std::string stringify_protection_attributes(uint32_t attributes, char sep = ';');

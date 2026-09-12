@@ -119,7 +119,7 @@ AC_PROG_CC_STDC
 AC_PROG_CXX(clang++)
 
 AX_REQUIRE_DEFINED([AX_CXX_COMPILE_STDCXX])
-AX_CXX_COMPILE_STDCXX([17], [ext], [mandatory])
+AX_CXX_COMPILE_STDCXX([23], [ext], [mandatory])
 
 ######################################################
 
@@ -852,6 +852,7 @@ AC_CHECK_LIB(dl, dlopen, [], [AC_ERROR([No dl found, dynamic linking isn't possi
 
 AC_CONFIG_FILES([Makefile src/Makefile
                  src/libdrakvuf/Makefile
+                 src/slog/Makefile
                  src/libinjector/Makefile
                  src/xen_helper/Makefile
                  src/plugins/Makefile

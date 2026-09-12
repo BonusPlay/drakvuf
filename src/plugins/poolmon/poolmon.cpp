@@ -117,7 +117,7 @@
 #include <ctype.h>
 
 #include "plugins/plugins.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 
 #include "private.h"
 #include "poolmon.h"
@@ -180,29 +180,20 @@ static event_response_t cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
 
     pool_type_str = pool_type<MaxPoolType ? pool_types[pool_type] : "unknown_pool_type";
 
-    std::optional<fmt::Rstr<decltype(s->source)>> source;
-    std::optional<fmt::Rstr<decltype(s->description)>> description;
+    std::optional<slog::value> source;
+    std::optional<slog::value> description;
     if (s)
     {
-        source = fmt::Rstr(s->source);
-        description = fmt::Rstr(s->description);
+        source = slog::text(s->source);
+        description = slog::text(s->description);
     }
 
-    // Remove non-ascii characters from tag
-    for (size_t i = 0; i < sizeof(tag); ++i)
-    {
-        if (!isascii(tag[i]))
-            tag[i] = '?';
-    }
-
-    fmt::print(p->format, "poolmon", drakvuf, info,
-        keyval("VCPU", fmt::Nval(info->vcpu)),
-        keyval("CR3", fmt::Nval(info->regs->cr3)),
-        keyval("Tag", fmt::Qstr(tag)),
-        keyval("Type", fmt::Qstr(pool_type_str)),
-        keyval("Size", fmt::Nval(size)),
-        keyval("Source", source),
-        keyval("Description", description)
+    slog::emit("poolmon", drakvuf, info,
+        slog::attr("Tag", slog::bytes(tag, sizeof(uint32_t))),
+        slog::attr("Type", slog::text(pool_type_str)),
+        slog::attr("Size", slog::number(size)),
+        slog::attr("Source", source),
+        slog::attr("Description", description)
     );
 
     return 0;
@@ -224,7 +215,7 @@ static event_response_t cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
 
 /* ----------------------------------------------------- */
 
-poolmon::poolmon(drakvuf_t drakvuf, output_format_t output)
+poolmon::poolmon(drakvuf_t drakvuf)
 {
     this->pooltag_tree = pooltag_build_tree();
 
@@ -237,8 +228,6 @@ poolmon::poolmon(drakvuf_t drakvuf, output_format_t output)
     this->trap.data = (void*)this;
     this->trap.ttl = drakvuf_get_limited_traps_ttl(drakvuf);
     this->trap.ah_cb = nullptr;
-    this->format = output;
-
     if ( !drakvuf_add_trap(drakvuf, &this->trap) )
         throw -1;
 }

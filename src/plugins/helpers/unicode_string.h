@@ -104,27 +104,69 @@
 #pragma once
 #include <libdrakvuf/libdrakvuf.h>
 #include <string>
-#include <optional>
+#include <utility>
 
-struct unicode_string
+#include "slog/slog.hpp"
+
+class unicode_string
 {
-    explicit unicode_string(drakvuf_t drakvuf, addr_t str_addr, vmi_pid_t pid = 0)
-        : raw{drakvuf_read_unicode_va(drakvuf, str_addr, pid)}
+public:
+    unicode_string() = default;
+
+    explicit unicode_string(unicode_string_t* input)
+        : raw_{input}
     {}
 
-    operator std::string()
+    unicode_string(drakvuf_t drakvuf, drakvuf_trap_info_t* info, addr_t addr)
+        : raw_{drakvuf_read_unicode(drakvuf, info, addr)}
+    {}
+
+    unicode_string(drakvuf_t drakvuf, const access_context_t* ctx)
+        : raw_{drakvuf_read_unicode_common(drakvuf, ctx)}
+    {}
+
+    unicode_string(drakvuf_t drakvuf, addr_t vaddr, vmi_pid_t pid = 0)
+        : raw_{drakvuf_read_unicode_va(drakvuf, vaddr, pid)}
+    {}
+
+    unicode_string(const unicode_string&) = delete;
+    unicode_string& operator=(const unicode_string&) = delete;
+
+    unicode_string(unicode_string&& other) noexcept
+        : raw_{std::exchange(other.raw_, nullptr)}
+    {}
+
+    unicode_string& operator=(unicode_string&& other) noexcept
     {
-        if (!content)
-            content = std::string(reinterpret_cast<const char*>(raw->contents));
-        return *content;
+        if (this != &other)
+        {
+            vmi_free_unicode_str(raw_);
+            raw_ = std::exchange(other.raw_, nullptr);
+        }
+        return *this;
     }
 
     ~unicode_string()
     {
-        vmi_free_unicode_str(raw);
+        vmi_free_unicode_str(raw_);
+    }
+
+    operator slog::value() const
+    {
+        return slog::value(raw_);
+    }
+
+    // For the C APIs that still want the raw string.
+    const unicode_string_t* get() const noexcept
+    {
+        return raw_;
+    }
+
+    std::string printable_text() const
+    {
+        return slog::escaped_text(raw_);
     }
 
 private:
-    unicode_string_t* raw;
-    std::optional<std::string> content;
+    unicode_string_t* raw_{nullptr};
 };

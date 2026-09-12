@@ -102,43 +102,127 @@
  *                                                                         *
  ***************************************************************************/
 
-#include <sstream>
+#include "arguments.hpp"
 
-#include "utils.hpp"
+#include <array>
+#include <cstdio>
+#include <cstring>
+#include <utility>
+#include <vector>
+#include <plugins/helpers/unicode_string.h>
+#include <plugins/helpers/vmi_lock_guard.h>
 
-
-std::string escape_str(const std::string& s)
+namespace
 {
-    char const* const hexdig = "0123456789ABCDEF";
-    std::stringstream os;
 
-    for (unsigned char c : s)
+slog::value numeric_value(uint64_t raw, const argument_options& options)
+{
+    return options.format == argument_options::number_format::hex
+        ? slog::hex(raw) : slog::number(raw);
+}
+
+slog::value address_value(uint64_t address, slog::value data, bool omit_address)
+{
+    if (omit_address)
+        return data;
+
+    slog::keyval_array result;
+    result.push_back(slog::attr("Address", slog::hex(address)));
+    result.push_back(slog::attr("Value", std::move(data)));
+    return result;
+}
+
+} // namespace
+
+slog::value decode_argument(drakvuf_t drakvuf, drakvuf_trap_info_t* info,
+    uint64_t raw, const argument_spec& spec)
+{
+    if (spec.kind == argument_kind::number)
+        return numeric_value(raw, spec.options);
+
+    ACCESS_CONTEXT(ctx,
+        .translate_mechanism = VMI_TM_PROCESS_DTB,
+        .dtb = info->regs->cr3,
+        .addr = raw
+    );
+
+    switch (spec.kind)
     {
-        switch (c)
+        case argument_kind::c_string:
         {
-            case '\\':
-                os << "\\\\";
-                break;
-            case '\t':
-                os << "\\t";
-                break;
-            case '\r':
-                os << "\\r";
-                break;
-            case '\n':
-                os << "\\n";
-                break;
-            case '"':
-                os << "\\\"";
-                break;
-            default:
-                if (c < ' ')
-                    os << "\\x" << hexdig[c >> 4] << hexdig[c & 0xF];
-                else
-                    os << c;
-                break;
+            auto vmi = vmi_lock_guard(drakvuf);
+            char* buffer = vmi_read_str(vmi, &ctx);
+            auto data = slog::text(buffer ? buffer : "");
+            g_free(buffer);
+            return address_value(raw, std::move(data), spec.options.omit_address);
         }
-    }
+        case argument_kind::wide_string:
+        {
+            unicode_string buffer(drakvuf_read_wchar_string(drakvuf, &ctx));
+            return address_value(raw, buffer, spec.options.omit_address);
+        }
+        case argument_kind::unicode_string:
+        {
+            const bool is32bit = drakvuf_process_is32bit(drakvuf, info);
+            unicode_string buffer(is32bit ? drakvuf_read_unicode32(drakvuf, info, raw)
+                : drakvuf_read_unicode(drakvuf, info, raw));
+            return address_value(raw, buffer, spec.options.omit_address);
+        }
+        case argument_kind::bytes16:
+        {
+            auto vmi = vmi_lock_guard(drakvuf);
+            std::array<uint8_t, 16> buffer{};
+            const size_t size = VMI_SUCCESS == vmi_read(
+                vmi, &ctx, buffer.size(), buffer.data(), nullptr) ? buffer.size() : 0;
+            return address_value(raw, slog::bytes(buffer.data(), size), spec.options.omit_address);
+        }
+        case argument_kind::uint32_pointer:
+        {
+            auto vmi = vmi_lock_guard(drakvuf);
+            uint32_t data = 0;
+            if (vmi_read_32(vmi, &ctx, &data) != VMI_SUCCESS)
+                data = 0;
+            return numeric_value(data, spec.options);
+        }
+        case argument_kind::uint64_pointer:
+        {
+            auto vmi = vmi_lock_guard(drakvuf);
+            uint64_t data = 0;
+            if (vmi_read_64(vmi, &ctx, &data) != VMI_SUCCESS)
+                data = 0;
+            return numeric_value(data, spec.options);
+        }
+        case argument_kind::pointer_pointer:
+        {
+            addr_t data = 0;
+            if (drakvuf_read_addr(drakvuf, info, &ctx, &data) != VMI_SUCCESS)
+                data = 0;
+            return numeric_value(data, spec.options);
+        }
+        case argument_kind::guid:
+        {
+            struct
+            {
+                uint32_t Data1;
+                uint16_t Data2;
+                uint16_t Data3;
+                uint8_t Data4[8];
+            } __attribute__((packed, aligned(4))) guid{};
 
-    return os.str();
+            auto vmi = vmi_lock_guard(drakvuf);
+            if (vmi_read(vmi, &ctx, sizeof(guid), &guid, nullptr) != VMI_SUCCESS)
+                memset(&guid, 0, sizeof(guid));
+
+            char text[64]{};
+            snprintf(text, sizeof(text),
+                "%08X-%04hX-%04hX-%02hhX%02hhX-%02hhX%02hhX%02hhX%02hhX%02hhX%02hhX",
+                guid.Data1, guid.Data2, guid.Data3, guid.Data4[0], guid.Data4[1],
+                guid.Data4[2], guid.Data4[3], guid.Data4[4],
+                guid.Data4[5], guid.Data4[6], guid.Data4[7]);
+            return slog::text(text);
+        }
+        case argument_kind::number:
+            break; // Handled above without reading guest memory.
+    }
+    return slog::null;
 }

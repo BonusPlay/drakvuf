@@ -1,7 +1,7 @@
 project('DRAKVUF (C) Tamas K Lengyel 2014-2024', 'c', 'cpp',
         version : '1.1',
         default_options : [
-            'cpp_std=c++17',
+            'cpp_std=c++23',
             'buildtype=release',
             'strip=true',
             'default_library=static',
@@ -135,6 +135,7 @@ summary({
 # Load meson.build from subdirs
 subdir('src/xen_helper')
 subdir('src/libdrakvuf')
+subdir('src/slog')
 subdir('src/libinjector')
 subdir('src/libusermode')
 subdir('src/libhook')
@@ -159,7 +160,7 @@ executable('drakvuf',
     include_directories : incdir,
     dependencies : deps,
     link_language : 'cpp',
-    link_with : [libdrakvuf, drakvuf_plugins, libinjector],
+    link_with : [libdrakvuf, drakvuf_plugins, libinjector, libslog],
     link_args : [hardened_link_args, coverage_link_args],
     install : true,
 )

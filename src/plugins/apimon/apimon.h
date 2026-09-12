@@ -134,7 +134,7 @@ public:
     wanted_hooks_t wanted_hooks;
     std::unordered_map<vmi_pid_t, std::vector<apimon_module>> procs;
 
-    apimon(drakvuf_t drakvuf, const apimon_config* config, output_format_t output);
+    apimon(drakvuf_t drakvuf, const apimon_config* config);
     ~apimon();
 
     virtual bool stop_impl() override;

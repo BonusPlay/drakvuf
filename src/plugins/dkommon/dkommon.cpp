@@ -104,7 +104,7 @@
 
 #include <libvmi/libvmi.h>
 #include "libdrakvuf/libdrakvuf.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 #include <algorithm>
 
 #include "dkommon.h"
@@ -142,25 +142,27 @@ static const std::map<uint64_t, std::pair<uint64_t, uint64_t>> srv_offsets =
     { win_10_1803_ver, { 0x40, 0x18 } }
 };
 
-static void print_hidden_process_information(drakvuf_t drakvuf, drakvuf_trap_info_t* info, dkommon* plugin, vmi_pid_t pid)
+static void print_hidden_process_information(
+    drakvuf_t drakvuf, drakvuf_trap_info_t* info, vmi_pid_t pid)
 {
-    fmt::print(plugin->format, "dkommon", drakvuf, info,
-        keyval("Message", fmt::Qstr("Hidden Process")),
-        keyval("HiddenPID", fmt::Nval(pid))
+    slog::emit("dkommon", drakvuf, info,
+        slog::attr("Message", slog::text("Hidden Process")),
+        slog::attr("HiddenPID", slog::number(pid))
     );
 }
 
-static void print_driver_information(drakvuf_t drakvuf, drakvuf_trap_info_t* info, output_format_t format, const char* message, const char* name)
+static void print_driver_information(drakvuf_t drakvuf, drakvuf_trap_info_t* info,
+    const char* message, slog::value name)
 {
-    fmt::print(format, "dkommon", drakvuf, info,
-        keyval("Message", fmt::Qstr(message)),
-        keyval("DriverName", fmt::Qstr(name))
+    slog::emit("dkommon", drakvuf, info,
+        slog::attr("Message", slog::text(message)),
+        slog::attr("DriverName", std::move(name))
     );
 }
 
-static std::set<std::string> enumerate_drivers(dkommon* plugin, drakvuf_t drakvuf)
+static std::map<std::string, unicode_string> enumerate_drivers(dkommon* plugin, drakvuf_t drakvuf)
 {
-    std::set<std::string> drivers_list;
+    std::map<std::string, unicode_string> drivers_list;
     vmi_lock_guard vmi(drakvuf);
 
     ACCESS_CONTEXT(ctx,
@@ -188,13 +190,10 @@ static std::set<std::string> enumerate_drivers(dkommon* plugin, drakvuf_t drakvu
         }
 
         ctx.addr = entry + plugin->offsets[LDR_DATA_TABLE_ENTRY_BASEDLLNAME];
-        auto name = drakvuf_read_unicode_common(drakvuf, &ctx);
-        if (name && name->contents)
-        {
-            auto drv = std::string(reinterpret_cast<char*>(name->contents));
-            drivers_list.insert(std::move(drv));
-            vmi_free_unicode_str(name);
-        }
+        unicode_string name(drakvuf, &ctx);
+        auto drv = name.printable_text();
+        if (!drv.empty())
+            drivers_list.emplace(std::move(drv), std::move(name));
     } while (entry != list_head);
 
     return drivers_list;
@@ -244,21 +243,20 @@ static event_response_t load_unload_driver_cb(drakvuf_t drakvuf, drakvuf_trap_in
     );
 
     vmi_lock_guard vmi(drakvuf);
-    unicode_string_t* drvname = drakvuf_read_unicode_common(drakvuf, &ctx);
-    if (drvname && drvname->contents)
+    unicode_string drvname(drakvuf, &ctx);
+    std::string drvname_str = drvname.printable_text();
+    if (!drvname_str.empty())
     {
-        std::string drvname_str{ reinterpret_cast<char*>(drvname->contents) };
         if (i_insert)
         {
             PRINT_DEBUG("[DKOMMON] Loading %s\n", drvname_str.c_str());
-            plugin->loaded_drivers.insert(drvname_str);
+            plugin->loaded_drivers.emplace(drvname_str, std::move(drvname));
         }
         else
         {
             PRINT_DEBUG("[DKOMMON] Unloading %s\n", drvname_str.c_str());
             plugin->loaded_drivers.erase(drvname_str);
         }
-        vmi_free_unicode_str(drvname);
     }
 
     return VMI_EVENT_RESPONSE_NONE;
@@ -300,7 +298,7 @@ static event_response_t delete_process_cb(drakvuf_t drakvuf, drakvuf_trap_info_t
 
     if (list_entry_va == flink && flink == blink && flink && blink)
     {
-        print_hidden_process_information(drakvuf, info, plugin, pid);
+        print_hidden_process_information(drakvuf, info, pid);
     }
 
 done:
@@ -481,8 +479,8 @@ std::set<addr_t> dkommon::enumerate_services(vmi_instance_t vmi)
     return out;
 }
 
-dkommon::dkommon(drakvuf_t drakvuf, const dkommon_config* config, output_format_t output)
-    : pluginex(drakvuf, output), format(output), offsets(new size_t[__OFFSET_MAX]), srv_pid(0), srv_module_base(0)
+dkommon::dkommon(drakvuf_t drakvuf, const dkommon_config* config)
+    : pluginex(drakvuf), offsets(new size_t[__OFFSET_MAX]), srv_pid(0), srv_module_base(0)
 {
     if (!drakvuf_get_kernel_struct_members_array_rva(drakvuf, offset_names, __OFFSET_MAX, offsets))
         throw -1;
@@ -578,17 +576,17 @@ bool dkommon::stop_impl()
         {
             if (std::find(this->live_processes.begin(), this->live_processes.end(), pid) == this->live_processes.end())
             {
-                print_hidden_process_information(drakvuf, nullptr, this, pid);
+                print_hidden_process_information(drakvuf, nullptr, pid);
             }
         }
 
         // Check hidden drivers
         //
         auto temp_drivers = enumerate_drivers(this, drakvuf);
-        for (const auto& drvname : this->loaded_drivers)
+        for (const auto& [drvname, name] : this->loaded_drivers)
         {
-            if (std::find(temp_drivers.begin(), temp_drivers.end(), drvname) == temp_drivers.end())
-                print_driver_information(drakvuf, nullptr, this->format, "Hidden Driver", drvname.c_str());
+            if (temp_drivers.find(drvname) == temp_drivers.end())
+                print_driver_information(drakvuf, nullptr, "Hidden Driver", name);
         }
         // Check hidden services
         //
@@ -609,14 +607,8 @@ bool dkommon::stop_impl()
                         .translate_mechanism = VMI_TM_PROCESS_PID,
                         .pid = srv_pid,
                         .addr = name_va);
-                    auto name = drakvuf_read_wchar_string(drakvuf, &ctx);
-                    if (name)
-                    {
-                        print_driver_information(drakvuf, nullptr, this->format, "Hidden Service", (const char*)name->contents);
-                        vmi_free_unicode_str(name);
-                    }
-                    else
-                        print_driver_information(drakvuf, nullptr, this->format, "Hidden Service", "<Anonymous>");
+                    unicode_string name{ drakvuf_read_wchar_string(drakvuf, &ctx) };
+                    print_driver_information(drakvuf, nullptr, "Hidden Service", name);
                 }
             }
         }

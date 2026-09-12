@@ -106,6 +106,8 @@
 #define FILEDELETE_PRIVATE_H
 
 #include "../plugin_utils.h"
+#include "helpers/unicode_string.h"
+#include "slog/slog.hpp"
 
 struct fileextractor_config
 {
@@ -285,7 +287,7 @@ private:
 
 public:
     handle_t handle;
-    std::string filename;
+    unicode_string filename;
     const task_reason reason{task_reason::invalid};
 
     return_ctx target;
@@ -313,6 +315,10 @@ public:
     uint64_t new_eof{0};
 
     int idx{0};
+
+    // The metadata record as first written; update_file_metadata() amends and
+    // rewrites it rather than parsing the file back.
+    slog::keyval_array metadata;
 
     bool extracted{false}; // indicates whether the file has been extracted from the guest system.
     bool append{false};    // indicates whether the file was opened with only the FILE_APPEND_DATA flag. If so, ByteOffset is ignored.
@@ -353,11 +359,11 @@ public:
     addr_t pool{0};
 
     task_t(handle_t handle_,
-        std::string filename_,
+        unicode_string filename_,
         task_reason reason_,
         addr_t file_obj_)
         : handle(handle_)
-        , filename(filename_)
+        , filename(std::move(filename_))
         , reason(reason_)
         , file_obj(file_obj_)
     {}

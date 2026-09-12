@@ -105,14 +105,14 @@
 #ifndef WIN_PROCDUMP2_PRIVATE_H
 #define WIN_PROCDUMP2_PRIVATE_H
 
+#include <format>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <unordered_set>
 
 #include "writer.h"
-
-using namespace std::string_literals;
 using std::string;
 
 namespace procdump2_ns
@@ -310,7 +310,7 @@ public:
      * processing.
      */
     addr_t    referenced_process_base{0};
-    string    target_process_name;
+    std::optional<string> target_process_name;
     vmi_pid_t target_process_pid{0};
     const char* dump_reason;
 
@@ -341,7 +341,7 @@ public:
 
     win_procdump2_ctx(bool is_hosted,
         addr_t base,
-        std::string name,
+        std::optional<std::string> name,
         vmi_pid_t pid,
         uint64_t idx_,
         std::string procdump_dir,
@@ -349,14 +349,14 @@ public:
         const char* dump_reason)
         : m_target_process_base(base)
         , is_hosted(is_hosted)
-        , target_process_name(name)
+        , target_process_name(std::move(name))
         , target_process_pid(pid)
         , dump_reason{dump_reason}
         , idx(idx_)
     {
-        data_file_name = "procdump."s + std::to_string(idx);
+        data_file_name = std::format("procdump.{}", idx);
         writer = ProcdumpWriterFactory::build(
-                procdump_dir + "/"s + data_file_name,
+                std::format("{}/{}", procdump_dir, data_file_name),
                 dump_compression);
     }
 

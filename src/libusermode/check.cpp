@@ -103,7 +103,7 @@
  ***************************************************************************/
 
 #include "utils.hpp"
-#include "printers/printers.hpp"
+#include "arguments.hpp"
 #include "userhook.hpp"
 
 #include <sstream>
@@ -140,9 +140,9 @@ static Suite* dll_matching_suite(void)
 
 static plugin_target_config_entry_t test_parse_dll_entry(const std::string& entry)
 {
-    PrinterConfig config;
+    argument_options options;
     std::stringstream ss(entry);
-    return parse_entry(ss, config);
+    return parse_entry(ss, options);
 }
 
 START_TEST(test_parse_dll_hook)
@@ -157,7 +157,7 @@ START_TEST(test_parse_dll_hook)
     ck_assert(entry.offset == 0);
     ck_assert(!entry.no_retval);
     ck_assert(entry.actions.log && !entry.actions.stack);
-    ck_assert(entry.argument_printers.size() == 5);
+    ck_assert(entry.arguments.size() == 5);
 }
 END_TEST
 
@@ -173,7 +173,7 @@ START_TEST(test_parse_dll_hook_with_offset)
     ck_assert(entry.offset == 0x13cd3);
     ck_assert(!entry.no_retval);
     ck_assert(entry.actions.log && !entry.actions.stack);
-    ck_assert(entry.argument_printers.size() == 2);
+    ck_assert(entry.arguments.size() == 2);
 }
 END_TEST
 
@@ -189,7 +189,7 @@ START_TEST(test_parse_dll_hook_with_empty_args)
     ck_assert(entry.offset == 0);
     ck_assert(!entry.no_retval);
     ck_assert(entry.actions.log && !entry.actions.stack);
-    ck_assert(entry.argument_printers.empty());
+    ck_assert(entry.arguments.empty());
 }
 END_TEST
 

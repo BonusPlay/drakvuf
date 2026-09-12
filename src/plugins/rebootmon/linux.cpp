@@ -106,7 +106,7 @@
 
 #include "rebootmon.h"
 #include "linux.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 #include "plugins/helpers/hooks.h"
 
 using namespace rebootmon_ns;
@@ -125,19 +125,19 @@ event_response_t linux_rebootmon::reboot_cb(drakvuf_t drakvuf, drakvuf_trap_info
     uint32_t magic2 = drakvuf_get_function_argument(drakvuf, info, 2);
     uint32_t cmd = drakvuf_get_function_argument(drakvuf, info, 3);
     addr_t arg = drakvuf_get_function_argument(drakvuf, info, 4);
-    std::optional<fmt::Estr<std::string>> opt_arg;
+    std::optional<slog::value> opt_arg;
     if (arg)
     {
         auto s = drakvuf_read_ascii_str(drakvuf, info, arg);
-        opt_arg = std::string(s ?: "");
+        opt_arg = slog::text(s);
         g_free(s);
     }
 
-    fmt::print(this->m_output_format, "rebootmon", drakvuf, info,
-        keyval("Magic1", fmt::Rstr(parse_enum(magic1, reboot_magics))),
-        keyval("Magic2", fmt::Rstr(parse_enum(magic2, reboot_magics))),
-        keyval("Cmd", fmt::Rstr(parse_enum(cmd, reboot_commands))),
-        keyval("Arg", opt_arg));
+    slog::emit("rebootmon", drakvuf, info,
+        slog::attr("Magic1", slog::text(parse_enum(magic1, reboot_magics))),
+        slog::attr("Magic2", slog::text(parse_enum(magic2, reboot_magics))),
+        slog::attr("Cmd", slog::text(parse_enum(cmd, reboot_commands))),
+        slog::attr("Arg", opt_arg));
 
     return VMI_EVENT_RESPONSE_NONE;
 }
@@ -150,8 +150,8 @@ event_response_t linux_rebootmon::machine_restart_cb(drakvuf_t drakvuf, drakvuf_
     addr_t cmd_ptr = drakvuf_get_function_argument(drakvuf, info, 1);
     char* cmd = drakvuf_read_ascii_str(drakvuf, info, cmd_ptr);
 
-    fmt::print(this->m_output_format, "rebootmon", drakvuf, info,
-        keyval("Cmd", fmt::Estr(cmd ?: "")));
+    slog::emit("rebootmon", drakvuf, info,
+        slog::attr("Cmd", slog::text(cmd)));
 
     g_free(cmd);
 
@@ -168,7 +168,7 @@ event_response_t linux_rebootmon::machine_power_off_cb(drakvuf_t drakvuf, drakvu
     void machine_power_off(void)
     */
 
-    fmt::print(this->m_output_format, "rebootmon", drakvuf, info);
+    slog::emit("rebootmon", drakvuf, info);
 
     if (this->abort_on_power_off)
         drakvuf_interrupt( drakvuf, SIGDRAKVUFPOWEROFF);
@@ -176,8 +176,8 @@ event_response_t linux_rebootmon::machine_power_off_cb(drakvuf_t drakvuf, drakvu
     return VMI_EVENT_RESPONSE_NONE;
 }
 
-linux_rebootmon::linux_rebootmon(drakvuf_t drakvuf, const rebootmon_config* c, output_format_t output) :
-    pluginex(drakvuf, output), abort_on_power_off(c->abort_on_power_off)
+linux_rebootmon::linux_rebootmon(drakvuf_t drakvuf, const rebootmon_config* c) :
+    pluginex(drakvuf), abort_on_power_off(c->abort_on_power_off)
 {
 #define REGISTER_HOOK_EX(name, syscall, cb, alias) \
     name ## _hook = createSyscallHook(#syscall, &linux_rebootmon::cb, #alias); \

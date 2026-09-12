@@ -4,8 +4,7 @@ plugin_sources = [
     'plugins.cpp',
     'plugins_ex.cpp',
     'plugin_utils.cpp',
-    'helpers/exclude_matcher.cpp',
-    'output_format/ostream.cpp'
+    'helpers/exclude_matcher.cpp'
 ]
 
 if get_option('plugin-syscalls')
@@ -378,15 +377,6 @@ drakvuf_plugins = static_library('drakvuf_plugins',
 )
 
 if check.found()
-    output_format_check = executable('output_format_check',
-        sources : 'output_format/check.cpp',
-        include_directories : incdir,
-        dependencies : [deps, check],
-        link_with : libdrakvuf,
-        install : false
-    )
-    test('output_format_check', output_format_check)
-
     if meson.version().version_compare('>=1.1.0')
         plugin_utils_o = drakvuf_plugins.extract_objects('plugin_utils.cpp')
         plugin_utils_dep = declare_dependency(objects: plugin_utils_o)
@@ -394,7 +384,7 @@ if check.found()
             sources : 'plugin_utils_check.cpp',
             include_directories : incdir,
             dependencies : [deps, plugin_utils_dep, check],
-            link_with : libdrakvuf,
+            link_with : [libdrakvuf, libslog],
             install : false
         )
         test('plugin_utils_check', plugin_utils_check)

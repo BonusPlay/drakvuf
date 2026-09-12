@@ -105,11 +105,10 @@
 #ifndef LINUX_PROCDUMP_PRIVATE_H
 #define LINUX_PROCDUMP_PRIVATE_H
 
+#include <format>
 #include <string>
 #include <set>
 #include "writer.h"
-
-using namespace std::string_literals;
 
 namespace procdump2_ns
 {
@@ -182,9 +181,9 @@ struct linux_procdump_task_t
         , idx(idx)
         , reason(reason)
     {
-        data_file_name = "procdump."s + std::to_string(idx);
+        data_file_name = std::format("procdump.{}", idx);
         writer = ProcdumpWriterFactory::build(
-                procdump_dir + "/"s + data_file_name,
+                std::format("{}/{}", procdump_dir, data_file_name),
                 dump_compression);
     }
 };

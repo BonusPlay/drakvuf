@@ -118,7 +118,7 @@ using namespace procdump2_ns;
 class linux_procdump: public pluginex
 {
 public:
-    linux_procdump(drakvuf_t drakvuf, const procdump2_config* config, output_format_t output);
+    linux_procdump(drakvuf_t drakvuf, const procdump2_config* config);
     ~linux_procdump() = default;
     virtual bool stop_impl() override;
 

@@ -118,7 +118,6 @@ private:
     std::unique_ptr<libhook::ManualHook> register_mem_hook(hook_cb_t callback, addr_t pa);
 
 public:
-    output_format_t format;
 
     size_t* offsets;
 
@@ -132,7 +131,7 @@ public:
 
     std::vector<std::unique_ptr<libhook::ManualHook>> ssdt_traps;
 
-    ssdtmon(drakvuf_t drakvuf, const ssdtmon_config* config, output_format_t output);
+    ssdtmon(drakvuf_t drakvuf, const ssdtmon_config* config);
     ~ssdtmon();
     virtual bool stop_impl() override;
 };

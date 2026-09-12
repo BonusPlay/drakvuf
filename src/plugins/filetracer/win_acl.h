@@ -107,7 +107,10 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 #include <plugins/plugins.h>
+
+#include "private.h"
 
 /* Represents SID as string
  *
@@ -128,7 +131,7 @@ std::string parse_sid(const uint8_t buffer[]);
  */
 std::string read_sid(vmi_instance_t vmi, access_context_t* ctx, size_t* offsets);
 
-/* Represents ACL of object as string.
+/* Represents an ACL as structured ACE entries.
  *
  * Accesses VM's virtual memory to read a whole ACL with accompanied ACEs and
  * returns human readable string.
@@ -139,6 +142,7 @@ std::string read_sid(vmi_instance_t vmi, access_context_t* ctx, size_t* offsets)
  *
  * Note. User should provide an ACL address through ctx parameter.
  */
-std::string read_acl(vmi_instance_t vmi, access_context_t* ctx, size_t* offsets, std::string base_name, output_format_t format = OUTPUT_DEFAULT);
+std::vector<filetracer_ns::acl_entry_t> read_acl(
+    vmi_instance_t vmi, access_context_t* ctx, size_t* offsets);
 
 #endif

@@ -115,7 +115,7 @@
 // For `filedelete2`
 using handle_t = uint64_t;
 using handled_t = bool;
-using file_name_t = std::string;
+using file_name_t = unicode_string;
 
 enum file_extraction_reason
 {
@@ -151,13 +151,12 @@ public:
 
     const char* dump_folder;
     uint32_t domid = 0;
-    output_format_t format;
     bool use_injector = false;
 
     std::map<std::pair<vmi_pid_t, handle_t>, std::pair<file_name_t, file_extraction_reason_t>> files;
     int sequence_number = 0;
 
-    filedelete(drakvuf_t drakvuf, const filedelete_config* config, output_format_t output);
+    filedelete(drakvuf_t drakvuf, const filedelete_config* config);
     filedelete(const filedelete&) = delete;
     filedelete& operator=(const filedelete&) = delete;
     ~filedelete();

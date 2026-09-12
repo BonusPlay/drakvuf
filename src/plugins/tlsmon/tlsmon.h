@@ -125,7 +125,7 @@
 class tlsmon: public pluginex
 {
 public:
-    tlsmon(drakvuf_t drakvuf, output_format_t output);
+    tlsmon(drakvuf_t drakvuf);
     ~tlsmon();
 
 private:

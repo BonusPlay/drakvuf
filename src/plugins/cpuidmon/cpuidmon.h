@@ -110,12 +110,11 @@
 class cpuidmon: public plugin
 {
 public:
-    output_format_t format;
     drakvuf_trap_t cpuid{};
     drakvuf_t drakvuf;
     bool stealth;
 
-    cpuidmon(drakvuf_t drakvuf, bool stealth, output_format_t output);
+    cpuidmon(drakvuf_t drakvuf, bool stealth);
     ~cpuidmon();
     virtual bool stop_impl() override;
 };

@@ -110,9 +110,8 @@
 class crashmon: public plugin
 {
 public:
-    const output_format_t format;
 
-    crashmon(drakvuf_t drakvuf, output_format_t output);
+    crashmon(drakvuf_t drakvuf);
 
     virtual bool stop_impl() override;
 private:

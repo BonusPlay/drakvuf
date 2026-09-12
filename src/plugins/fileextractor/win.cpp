@@ -106,7 +106,7 @@
 #include <inttypes.h>
 #include <sys/stat.h>
 #include <cassert>
-#include <sstream>
+#include <format>
 #include <string>
 #include <algorithm>
 #include <vector>
@@ -115,11 +115,10 @@
 #include <libinjector/libinjector.h>
 
 #include "plugins/plugins.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 
 #include "win.h"
 
-using std::ostringstream;
 using std::string;
 using namespace fileextractor_ns;
 
@@ -221,14 +220,14 @@ event_response_t win_fileextractor::createfile_ret_cb(drakvuf_t,
             addr_t file = 0;
             auto filename = get_file_name(vmi, info, handle, &file, nullptr);
 
-            if (exclude.match(filename))
+            if (exclude.match(filename.printable_text()))
             {
                 print_extraction_exclusion(info, filename);
                 return VMI_EVENT_RESPONSE_NONE;
             }
 
             tasks[id] = std::make_unique<task_t>(handle,
-                    filename,
+                    std::move(filename),
                     reason,
                     file);
             // save some process info
@@ -244,9 +243,7 @@ event_response_t win_fileextractor::createfile_ret_cb(drakvuf_t,
 
 static std::string get_filename(std::string dump_folder, int task_idx, std::string ext)
 {
-    std::stringstream file;
-    file << dump_folder << "/file." << std::setw(6) << std::setfill('0') << task_idx << "." << ext;
-    return file.str();
+    return std::format("{}/file.{:06}.{}", dump_folder, task_idx, ext);
 }
 
 static std::string get_data_filename(std::string dump_folder, int task_idx)
@@ -561,14 +558,14 @@ event_response_t win_fileextractor::createsection_cb(drakvuf_t,
             addr_t file = 0;
             auto filename = get_file_name(vmi, info, handle, &file, nullptr);
 
-            if (exclude.match(filename))
+            if (exclude.match(filename.printable_text()))
             {
                 print_extraction_exclusion(info, filename);
                 return VMI_EVENT_RESPONSE_NONE;
             }
 
             tasks[id] = std::make_unique<task_t>(handle,
-                    filename,
+                    std::move(filename),
                     task_t::task_reason::write,
                     file);
             // save some process info
@@ -690,11 +687,8 @@ win_fileextractor::error win_fileextractor::dispatch_queryvolumeinfo(
 {
     if (info->regs->rax)
     {
-        ostringstream msg;
-        msg << "ZwQueryVolumeInformationFile failed with status 0x"
-            << std::hex << info->regs->rax;
-
-        print_extraction_failure(info, task.filename, msg.str());
+        print_extraction_failure(info, task.filename, "ZwQueryVolumeInformationFile failed",
+            { slog::attr("Status", slog::hex(info->regs->rax)) });
         return error::error;
     }
     else
@@ -719,11 +713,9 @@ win_fileextractor::error win_fileextractor::dispatch_queryvolumeinfo(
 
         if (7 != dev_info.device_type) // FILE_DEVICE_DISK
         {
-            ostringstream msg;
-            msg << "ZwQueryVolumeInformationFile stop processing device type "
-                << dev_info.device_type;
-
-            print_extraction_failure(info, task.filename, msg.str());
+            print_extraction_failure(info, task.filename,
+                "ZwQueryVolumeInformationFile stop processing",
+                { slog::attr("DeviceType", slog::number(dev_info.device_type)) });
             task.stage(task_t::stage_t::finished);
             return error::none;
         }
@@ -742,11 +734,8 @@ win_fileextractor::error win_fileextractor::dispatch_queryinfo(
 {
     if (info->regs->rax)
     {
-        ostringstream msg;
-        msg << "ZwQueryInformationFile failed with status 0x"
-            << std::hex << info->regs->rax;
-
-        print_extraction_failure(info, task.filename, msg.str());
+        print_extraction_failure(info, task.filename, "ZwQueryInformationFile failed",
+            { slog::attr("Status", slog::hex(info->regs->rax)) });
         return error::error;
     }
     else
@@ -794,10 +783,8 @@ win_fileextractor::error win_fileextractor::dispatch_createsection(
 {
     if (info->regs->rax)
     {
-        ostringstream msg;
-        msg << "ZwCreateSection failed with status 0x"
-            << std::hex << info->regs->rax;
-        print_extraction_failure(info, task.filename, msg.str());
+        print_extraction_failure(info, task.filename, "ZwCreateSection failed",
+            { slog::attr("Status", slog::hex(info->regs->rax)) });
         return error::error;
     }
     else
@@ -833,10 +820,8 @@ win_fileextractor::error win_fileextractor::dispatch_mapview(
 {
     if (info->regs->rax)
     {
-        ostringstream msg;
-        msg << "ZwMapViewOfSection failed with status 0x"
-            << std::hex << info->regs->rax;
-        print_extraction_failure(info, task.filename, msg.str());
+        print_extraction_failure(info, task.filename, "ZwMapViewOfSection failed",
+            { slog::attr("Status", slog::hex(info->regs->rax)) });
     }
     else
     {
@@ -1289,19 +1274,18 @@ bool win_fileextractor::get_file_object_flags(drakvuf_trap_info_t* info,
     return success;
 }
 
-std::string win_fileextractor::get_file_name(vmi_instance_t vmi,
+unicode_string win_fileextractor::get_file_name(vmi_instance_t vmi,
     drakvuf_trap_info_t* info,
     addr_t handle,
     addr_t* out_file,
     addr_t* out_filetype)
 {
-    std::string unknown{"<UNKNOWN>"};
     addr_t obj = drakvuf_get_obj_by_handle(drakvuf,
             info->attached_proc_data.base_addr,
             handle);
 
     if (!obj)
-        return unknown;
+        return {};
 
     addr_t file = obj + this->offsets[OBJECT_HEADER_BODY];
     addr_t filename = file + this->offsets[FILE_OBJECT_FILENAME];
@@ -1320,18 +1304,12 @@ std::string win_fileextractor::get_file_name(vmi_instance_t vmi,
 
     uint8_t type = 0;
     if (VMI_FAILURE == vmi_read_8(vmi, &ctx, &type))
-        return unknown;
+        return {};
 
     if (type != 5)
-        return unknown;
+        return {};
 
-    unicode_string_t* filename_us = drakvuf_read_unicode(drakvuf,
-            info,
-            filename);
-    if (!filename_us) return unknown;
-    std::string ret = {(const char*)filename_us->contents};
-    vmi_free_unicode_str(filename_us);
-    return ret;
+    return unicode_string(drakvuf, info, filename);
 }
 
 bool win_fileextractor::get_file_object_currentbyteoffset(vmi_instance_t vmi,
@@ -1372,7 +1350,6 @@ bool win_fileextractor::get_write_offset(vmi_instance_t vmi, drakvuf_trap_info_t
 void win_fileextractor::print_file_information(drakvuf_trap_info_t* info,
     task_t& task)
 {
-    std::string flags = parse_flags(task.fo_flags, fo_flags_map, this->format);
     std::string r;
     switch (task.reason)
     {
@@ -1390,26 +1367,24 @@ void win_fileextractor::print_file_information(drakvuf_trap_info_t* info,
             break;
     }
 
-    std::optional<fmt::Qstr<std::string>> file_sha256;
+    std::optional<slog::value> file_sha256;
     if (!task.file_sha256.empty())
         file_sha256 = task.file_sha256;
 
-    fmt::print(this->format, "fileextractor", drakvuf, info,
-        keyval("FileName", fmt::Estr(task.filename)),
-        keyval("Size", fmt::Nval(task.file_size)),
-        keyval("FileHash", file_sha256),
-        keyval("Flags", fmt::Xval(task.fo_flags)),
-        flagsval("FlagsExpanded", flags),
-        keyval("SeqNum", fmt::Nval(task.idx)),
-        keyval("Reason", fmt::Qstr(r)),
-        keyval("isClosed", fmt::Nval(task.closed))
+    slog::emit("fileextractor", drakvuf, info,
+        slog::attr("FileName", task.filename),
+        slog::attr("Size", slog::number(task.file_size)),
+        slog::attr("FileHash", file_sha256),
+        slog::attr("Flags", slog::flags(task.fo_flags, fo_flags_map)),
+        slog::attr("SeqNum", slog::number(task.idx)),
+        slog::attr("Reason", slog::text(r)),
+        slog::attr("isClosed", slog::number(task.closed))
     );
 }
 
 void win_fileextractor::print_plugin_close_information(drakvuf_trap_info_t* info,
     task_t& task)
 {
-    std::string flags = parse_flags(task.fo_flags, fo_flags_map, this->format);
     std::string r;
     switch (task.reason)
     {
@@ -1427,23 +1402,21 @@ void win_fileextractor::print_plugin_close_information(drakvuf_trap_info_t* info
             break;
     }
 
-    std::optional<fmt::Qstr<std::string>> file_sha256;
+    std::optional<slog::value> file_sha256;
     if (!task.file_sha256.empty())
         file_sha256 = task.file_sha256;
 
-    fmt::print(this->format, "fileextractor_close", drakvuf, info,
-        keyval("Time", TimeVal{UNPACK_TIMEVAL(g_get_real_time())}),
-        keyval("ProcessName", fmt::Qstr(task.process_name)),
-        keyval("PID", fmt::Nval(task.pid)),
-        keyval("PPID", fmt::Nval(task.ppid)),
-        keyval("FileName", fmt::Estr(task.filename)),
-        keyval("Size", fmt::Nval(task.file_size)),
-        keyval("FileHash", file_sha256),
-        keyval("Flags", fmt::Xval(task.fo_flags)),
-        flagsval("FlagsExpanded", flags),
-        keyval("SeqNum", fmt::Nval(task.idx)),
-        keyval("Reason", fmt::Qstr(r)),
-        keyval("isClosed", fmt::Nval(task.closed))
+    slog::emit("fileextractor_close", drakvuf, info,
+        slog::attr("OwnerProcessName", slog::text(task.process_name)),
+        slog::attr("OwnerPID", slog::number(task.pid)),
+        slog::attr("OwnerPPID", slog::number(task.ppid)),
+        slog::attr("FileName", task.filename),
+        slog::attr("Size", slog::number(task.file_size)),
+        slog::attr("FileHash", file_sha256),
+        slog::attr("Flags", slog::flags(task.fo_flags, fo_flags_map)),
+        slog::attr("SeqNum", slog::number(task.idx)),
+        slog::attr("Reason", slog::text(r)),
+        slog::attr("isClosed", slog::number(task.closed))
     );
 }
 
@@ -1490,21 +1463,23 @@ void win_fileextractor::calc_checksum(task_t& task)
 }
 
 void win_fileextractor::print_extraction_failure(drakvuf_trap_info_t* info,
-    const string& filename,
-    const string& message)
+    const unicode_string& filename,
+    const string& message,
+    slog::keyval_array extra)
 {
-    fmt::print(this->format, "fileextractor_fail", drakvuf, info,
-        keyval("FileName", fmt::Estr(filename)),
-        keyval("Message", fmt::Qstr(message))
+    slog::emit("fileextractor_fail", drakvuf, info,
+        slog::attr("FileName", filename),
+        slog::attr("Message", slog::text(message)),
+        std::move(extra)
     );
 }
 
 void win_fileextractor::print_extraction_exclusion(drakvuf_trap_info_t* info,
-    const std::string& filename)
+    const unicode_string& filename)
 {
-    fmt::print(this->format, "fileextractor_skip", drakvuf, info,
-        keyval("FileName", fmt::Estr(filename)),
-        keyval("Message", fmt::Qstr("Excluded by filter"))
+    slog::emit("fileextractor_skip", drakvuf, info,
+        slog::attr("FileName", filename),
+        slog::attr("Message", slog::text("Excluded by filter"))
     );
 }
 
@@ -1516,103 +1491,48 @@ void win_fileextractor::save_file_metadata(drakvuf_trap_info_t* info,
     if (file.empty())
         return;
 
-    umask(S_IWGRP|S_IWOTH);
-    FILE* fp = fopen(file.data(), "w");
-    if (!fp)
-        return;
+    slog::keyval_array record;
 
-    json_object* jobj = json_object_new_object();
-    if (!jobj)
-    {
-        fclose(fp);
-        return;
-    }
+    record.push_back(slog::attr("FileName", task.filename));
+    record.push_back(slog::attr("FileSize", slog::number(task.file_size)));
+    record.push_back(slog::attr("FileFlags", slog::flags(task.fo_flags, fo_flags_map)));
+    record.push_back(slog::attr("SequenceNumber", slog::number(task.idx)));
+    record.push_back(slog::attr("ControlArea", slog::hex(control_area)));
+    record.push_back(slog::attr("PID", slog::number(static_cast<int64_t>(info->attached_proc_data.pid))));
+    record.push_back(slog::attr("PPID", slog::number(static_cast<int64_t>(info->attached_proc_data.ppid))));
+    record.push_back(slog::attr("ProcessName", slog::text(info->attached_proc_data.name)));
 
-    json_object_object_add(jobj,
-        "FileName",
-        json_object_new_string(task.filename.data()));
+    task.metadata = std::move(record);
 
-    json_object_object_add(jobj,
-        "FileSize",
-        json_object_new_int64(task.file_size));
-
-    json_object_object_add(jobj,
-        "FileFlags",
-        json_object_new_string_fmt("0x%lx (%s)",
-            task.fo_flags,
-            parse_flags(task.fo_flags, fo_flags_map, OUTPUT_DEFAULT, "0").c_str()));
-
-    json_object_object_add(jobj,
-        "SequenceNumber",
-        json_object_new_int(task.idx));
-
-    json_object_object_add(jobj,
-        "ControlArea",
-        json_object_new_string_fmt("0x%lx", control_area));
-
-    json_object_object_add(jobj,
-        "PID",
-        json_object_new_int64(static_cast<uint64_t>(info->attached_proc_data.pid)));
-
-    json_object_object_add(jobj,
-        "PPID",
-        json_object_new_int64(static_cast<uint64_t>(info->attached_proc_data.ppid)));
-
-    json_object_object_add(jobj,
-        "ProcessName",
-        json_object_new_string(info->attached_proc_data.name));
-
-    fprintf(fp, "%s\n", json_object_get_string(jobj));
-    fclose(fp);
-
-    json_object_put(jobj);
+    if (!slog::write_record(file, task.metadata))
+        PRINT_DEBUG("[FILEEXTRACTOR] Failed to write metadata file\n");
 }
 
-void win_fileextractor::update_file_metadata(drakvuf_trap_info_t* info,
-    task_t& task)
+void win_fileextractor::update_file_metadata(drakvuf_trap_info_t*, task_t& task)
 {
     //update metadata: change size, add sha256
     auto file = get_metadata_filename(this->dump_folder, task.idx);
-    if (file.empty())
+    if (file.empty() || task.metadata.empty())
         return;
 
-    umask(S_IWGRP|S_IWOTH);
-    FILE* fp = fopen(file.data(), "r+");
-    if (!fp)
-        return;
-    fseek(fp, 0, SEEK_END);
-    uint64_t size = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
-
-    // NULL-terminate buffer to avoid "heap-buffer-overflow"
-    auto buf = std::make_unique<char[]>(size+1);
-    if (size != fread(buf.get(), sizeof(char), size, fp))
+    const auto set = [&task](const char* key, slog::value data)
     {
-        fclose(fp);
-        return;
-    }
+        for (auto& field : task.metadata)
+        {
+            if (field.key == key)
+            {
+                field.data = std::move(data);
+                return;
+            }
+        }
+        task.metadata.push_back(slog::attr(key, std::move(data)));
+    };
 
-    json_object* jobj = json_tokener_parse(buf.get());
-    if (!jobj)
-    {
-        fclose(fp);
-        return;
-    }
+    set("FileSize", slog::number(task.file_size));
+    set("FileHash", slog::text(task.file_sha256));
 
-    json_object_object_add(jobj,
-        "FileSize",
-        json_object_new_int64(task.file_size));
-
-    json_object_object_add(jobj,
-        "FileHash",
-        json_object_new_string(task.file_sha256.data()));
-
-
-    fseek(fp, 0, SEEK_SET);
-    fprintf(fp, "%s\n", json_object_get_string(jobj));
-    fclose(fp);
-
-    json_object_put(jobj);
+    if (!slog::write_record(file, task.metadata))
+        PRINT_DEBUG("[FILEEXTRACTOR] Failed to update metadata file\n");
 }
 
 bool win_fileextractor::save_file_chunk(int file_sequence_number,
@@ -1753,7 +1673,7 @@ void win_fileextractor::free_resources(drakvuf_trap_info_t* info, task_t& task)
     PRINT_DEBUG(
         "[FILEEXTRACTOR] Free task: "
         "pid %d, name '''%s''', stage %d\n"
-        , task.target.ret_pid, task.filename.data()
+        , task.target.ret_pid, task.filename.printable_text().data()
         , (int)task.stage());
     drakvuf_vmi_response_set_gpr_registers(drakvuf, info, &task.target.regs, true);
     free_pool(task.pool);
@@ -1768,7 +1688,7 @@ void win_fileextractor::remove_task(drakvuf_trap_info_t* info, task_t& task,
     PRINT_DEBUG(
         "[FILEEXTRACTOR] Remove task: "
         "pid %lu, handle %#lx, name '''%s''', stage %d\n"
-        , task.pid, task.handle, task.filename.data()
+        , task.pid, task.handle, task.filename.printable_text().data()
         , (int)task.stage());
 
     if (restore_registers)
@@ -2019,14 +1939,14 @@ task_t* win_fileextractor::setinformation_cb_get_task(drakvuf_trap_info_t* info)
                     addr_t file = 0;
                     auto filename = get_file_name(vmi, info, handle, &file, nullptr);
 
-                    if (exclude.match(filename))
+                    if (exclude.match(filename.printable_text()))
                     {
                         print_extraction_exclusion(info, filename);
                         return nullptr;
                     }
 
                     tasks[id] = std::make_unique<task_t>(handle,
-                            filename,
+                            std::move(filename),
                             task_t::task_reason::del,
                             file);
                     // save some process info
@@ -2056,14 +1976,14 @@ task_t* win_fileextractor::setinformation_cb_get_task(drakvuf_trap_info_t* info)
                     addr_t file = 0;
                     auto filename = get_file_name(vmi, info, handle, &file, nullptr);
 
-                    if (exclude.match(filename))
+                    if (exclude.match(filename.printable_text()))
                     {
                         print_extraction_exclusion(info, filename);
                         return nullptr;
                     }
 
                     tasks[id] = std::make_unique<task_t>(handle,
-                            filename,
+                            std::move(filename),
                             task_t::task_reason::write,
                             file);
                     // save some process info
@@ -2133,7 +2053,7 @@ task_t* win_fileextractor::writefile_cb_get_task(drakvuf_trap_info_t* info)
                 return nullptr;
             }
 
-            if (exclude.match(filename))
+            if (exclude.match(filename.printable_text()))
             {
                 print_extraction_exclusion(info, filename);
                 return nullptr;
@@ -2141,7 +2061,7 @@ task_t* win_fileextractor::writefile_cb_get_task(drakvuf_trap_info_t* info)
 
             // create new task
             tasks[id] = std::make_unique<task_t>(handle,
-                    filename,
+                    std::move(filename),
                     task_t::task_reason::write,
                     file);
 
@@ -2170,16 +2090,14 @@ task_t* win_fileextractor::writefile_cb_get_task(drakvuf_trap_info_t* info)
  *                             Public interface                              *
  *****************************************************************************/
 win_fileextractor::win_fileextractor(drakvuf_t drakvuf,
-    const fileextractor_config* c,
-    output_format_t output)
-    : pluginex(drakvuf, output)
+    const fileextractor_config* c)
+    : pluginex(drakvuf)
     , timeout{c->timeout}
     , is32bit(drakvuf_get_page_mode(drakvuf) != VMI_PM_IA32E)
     , dump_folder(c->dump_folder)
     , hash_size(c->hash_size)
     , extract_size(c->extract_size)
     , exclude{c->exclude_file, "[FILEEXTRACTOR]"}
-    , format(output)
     , sequence_number()
 {
     if (dump_folder == nullptr)
@@ -2275,7 +2193,7 @@ bool win_fileextractor::stop_impl()
                 "[FILEEXTRACTOR] Pending tasks count: %zu. "
                 "pid %d, name '''%s''', stage %d\n"
                 , tasks.size()
-                , i.second->target.ret_pid, i.second->filename.data()
+                , i.second->target.ret_pid, i.second->filename.printable_text().data()
                 , (int)i.second->stage());
             return false;
         }

@@ -139,7 +139,7 @@ struct codemon_config_struct
 class codemon : public pluginex
 {
 public:
-    codemon(drakvuf_t drakvuf, const codemon_config_struct* config, output_format_t output);
+    codemon(drakvuf_t drakvuf, const codemon_config_struct* config);
 
     std::filesystem::path dump_dir;
 

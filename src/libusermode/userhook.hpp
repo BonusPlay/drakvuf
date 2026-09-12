@@ -114,7 +114,7 @@
 #include <glib.h>
 #include "plugins/plugins_ex.h"
 #include "utils.hpp"
-#include "printers/printers.hpp"
+#include "arguments.hpp"
 
 typedef event_response_t (*callback_t)(drakvuf_t drakvuf, drakvuf_trap_info* info);
 
@@ -136,7 +136,7 @@ struct hook_target_entry_t
     addr_t offset;
     bool no_retval{false};
     callback_t callback;
-    const std::vector < std::unique_ptr < ArgumentPrinter > >& argument_printers;
+    const std::vector<argument_spec>& arguments;
     target_hook_state state;
     drakvuf_trap_t* trap = nullptr;
     void* plugin;
@@ -145,7 +145,7 @@ struct hook_target_entry_t
         std::string clsid,
         bool no_retval,
         callback_t callback,
-        const std::vector < std::unique_ptr < ArgumentPrinter > >& argument_printers,
+        const std::vector<argument_spec>& arguments,
         void* plugin)
         : type(HOOK_BY_NAME)
         , target_name(std::move(target_name))
@@ -153,7 +153,7 @@ struct hook_target_entry_t
         , offset(0)
         , no_retval(no_retval)
         , callback(callback)
-        , argument_printers(argument_printers)
+        , arguments(arguments)
         , state(HOOK_FIRST_TRY)
         , plugin(plugin)
     {}
@@ -163,7 +163,7 @@ struct hook_target_entry_t
         addr_t offset,
         bool no_retval,
         callback_t callback,
-        const std::vector < std::unique_ptr < ArgumentPrinter > >& argument_printers,
+        const std::vector<argument_spec>& arguments,
         void* plugin)
         : type(HOOK_BY_OFFSET)
         , target_name(std::move(target_name))
@@ -171,7 +171,7 @@ struct hook_target_entry_t
         , offset(offset)
         , no_retval(no_retval)
         , callback(callback)
-        , argument_printers(argument_printers)
+        , arguments(arguments)
         , state(HOOK_FIRST_TRY), plugin(plugin)
     {}
 };

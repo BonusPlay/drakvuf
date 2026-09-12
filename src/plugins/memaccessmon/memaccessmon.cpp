@@ -108,29 +108,24 @@
 #include <libdrakvuf/libdrakvuf.h>
 #include <libvmi/libvmi.h>
 
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 #include "memaccessmon.h"
 #include "private.h"
 
 void memaccessmon::print_result(mmvad_context* mmvad, drakvuf_trap_info_t* info, size_t bytes)
 {
-    std::optional<fmt::Qstr<std::string>> process_name_opt;
+    std::optional<slog::value> process_name_opt;
     if (mmvad->process_name)
     {
-        process_name_opt = fmt::Qstr(mmvad->process_name.value());
+        process_name_opt = slog::text(mmvad->process_name.value());
     }
 
-    std::optional<fmt::Qstr<std::string>> file_name_opt;
-    if (mmvad->filename)
-    {
-        file_name_opt = fmt::Qstr(mmvad->filename.value());
-    }
 
-    fmt::print(this->format, "memaccessmon", drakvuf, info,
-        keyval("TargetName", process_name_opt),
-        keyval("TargetPID", fmt::Nval(mmvad->pid)),
-        keyval("FileName", file_name_opt),
-        keyval("Bytes", fmt::Xval(bytes))
+    slog::emit("memaccessmon", drakvuf, info,
+        slog::attr("TargetName", process_name_opt),
+        slog::attr("TargetPID", slog::number(mmvad->pid)),
+        slog::attr("FileName", mmvad->filename),
+        slog::attr("Bytes", slog::hex(bytes))
     );
 }
 
@@ -164,11 +159,9 @@ mmvad_context* memaccessmon::find_mmvad(drakvuf_t drakvuf, addr_t process, addr_
 
         if (mmvad.file_name_ptr)
         {
-            if (auto filename = drakvuf_read_unicode_va(drakvuf, mmvad.file_name_ptr, pid))
-            {
-                vad.filename = (char*)filename->contents;
-                vmi_free_unicode_str(filename);
-            }
+            unicode_string filename(drakvuf, mmvad.file_name_ptr, pid);
+            if (filename.get() && filename.get()->contents)
+                vad.filename = std::move(filename);
         }
 
         vads[pid].push_back(std::move(vad));
@@ -212,8 +205,8 @@ event_response_t memaccessmon::readwrite_cb(drakvuf_t drakvuf, drakvuf_trap_info
     return VMI_EVENT_RESPONSE_NONE;
 }
 
-memaccessmon::memaccessmon(drakvuf_t drakvuf, output_format_t output)
-    : pluginex(drakvuf, output), format(output)
+memaccessmon::memaccessmon(drakvuf_t drakvuf)
+    : pluginex(drakvuf)
 {
     PRINT_DEBUG("[MEMACCESSMON] Starting initialization...\n");
     this->write_hook = createSyscallHook("NtWriteVirtualMemory", &memaccessmon::readwrite_cb);

@@ -107,7 +107,7 @@
 #include <json-c/json_object.h>
 
 #include "spraymon.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 
 bool spraymon::read_counter(drakvuf_t drakvuf, addr_t vaddr, vmi_pid_t pid, uint16_t* value)
 {
@@ -154,10 +154,10 @@ void spraymon::log(drakvuf_t drakvuf, uint16_t gdi_max_count, uint16_t usr_max_c
 {
     if (gdi_max_count > this->gdi_threshold || usr_max_count > this->usr_threshold)
     {
-        fmt::print(this->format, "spraymon", drakvuf, nullptr,
-            keyval("PID", fmt::Nval(pid)),
-            keyval("ProcessName", fmt::Qstr(process_name)),
-            keyval("Reason", fmt::Qstr("High graphic objects count")));
+        slog::emit("spraymon", drakvuf, nullptr,
+            slog::attr("PID", slog::number(pid)),
+            slog::attr("ProcessName", slog::text(process_name)),
+            slog::attr("Reason", slog::text("High graphic objects count")));
     }
 }
 
@@ -204,10 +204,8 @@ event_response_t spraymon::hook_setwin32process_cb(drakvuf_t drakvuf, drakvuf_tr
     return VMI_EVENT_RESPONSE_NONE;
 }
 
-spraymon::spraymon(drakvuf_t drakvuf, const spraymon_config* config,
-    output_format_t output)
-    : pluginex(drakvuf, output)
-    , format(output)
+spraymon::spraymon(drakvuf_t drakvuf, const spraymon_config* config)
+    : pluginex(drakvuf)
     , do_final_analysis(true)
     , gdi_threshold(config->gdi_threshold)
     , usr_threshold(config->usr_threshold)

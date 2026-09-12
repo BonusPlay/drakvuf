@@ -102,7 +102,7 @@
  *                                                                         *
  ***************************************************************************/
 
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 #include <libdrakvuf/libdrakvuf.h>
 
 #include "ebpfmon.h"
@@ -181,21 +181,21 @@ event_response_t ebpfmon::sys_bpf_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* inf
     const char* bpf_cmd_str = bpf_cmd_to_str(cmd);
     const char* type = bpf_attr_get_type(drakvuf, info, cmd, attr);
 
-    std::vector<std::pair<std::string, fmt::Aarg>> arguments;
-    arguments.emplace_back("Value", fmt::Rstr(bpf_cmd_str));
+    std::vector<slog::keyval> arguments;
+    arguments.emplace_back(slog::attr("Value", slog::text(bpf_cmd_str)));
 
     if (nullptr != type)
-        arguments.emplace_back("Type", fmt::Rstr(type));
+        arguments.emplace_back(slog::attr("Type", slog::text(type)));
 
-    fmt::print(this->m_output_format, "ebpfmon", drakvuf, info,
+    slog::emit("ebpfmon", drakvuf, info,
         arguments
     );
 
     return VMI_EVENT_RESPONSE_NONE;
 }
 
-ebpfmon::ebpfmon(drakvuf_t drakvuf, output_format_t output)
-    : pluginex(drakvuf, output)
+ebpfmon::ebpfmon(drakvuf_t drakvuf)
+    : pluginex(drakvuf)
 {
     ebpfhook = createSyscallHook("__do_sys_bpf", &ebpfmon::sys_bpf_cb, "bpf");
     if (nullptr == ebpfhook)

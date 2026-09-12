@@ -105,6 +105,8 @@
 
 #include <cstdint>
 
+#include "plugins/helpers/unicode_string.h"
+
 class etwmon;
 
 namespace etwmon_ns
@@ -157,7 +159,7 @@ struct wmi_logger_t
     addr_t clock_fn;
     addr_t cb_ctx;
 
-    std::string name;
+    unicode_string name;
 
     wmi_logger_t(etwmon* plugin, vmi_instance_t vmi, addr_t base);
 };

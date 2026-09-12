@@ -112,7 +112,7 @@
 #include <libdrakvuf/json-util.h>
 #include <libdrakvuf/libdrakvuf.h>
 
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 #include "hidevm.h"
 #include "private.h"
 
@@ -320,8 +320,8 @@ event_response_t hidevm::ReturnNtDeviceIoControlFile_cb(drakvuf_t, drakvuf_trap_
                                 this->addr_InputBuffer_Status = 0;
                                 this->addr_IoStatusBlock_Information = 0;
                                 this->NtClose_hook[hook_ID] = this->createSyscallHook("NtClose", &hidevm::NtClose_cb);
-                                fmt::print(this->format, "hidevm", drakvuf, info,
-                                    keyval("Reason", fmt::Qstr("MSAcpi_ThermalZoneTemperature query spoofed"))
+                                slog::emit("hidevm", drakvuf, info,
+                                    slog::attr("Reason", slog::text("MSAcpi_ThermalZoneTemperature query spoofed"))
                                 );
                             }
                             else
@@ -565,15 +565,10 @@ event_response_t hidevm::NtDeviceIoControlFile_cb(drakvuf_t, drakvuf_trap_info_t
 
 static auto IWbemServices__ExecQuery_args()
 {
-    std::vector<std::unique_ptr<ArgumentPrinter>> args;
-    args.emplace_back(std::make_unique<ArgumentPrinter>("This"));
-    args.emplace_back(std::make_unique<ArgumentPrinter>("strQueryLanguage"));
-    args.emplace_back(std::make_unique<ArgumentPrinter>("strQuery"));
-    args.emplace_back(std::make_unique<ArgumentPrinter>("lFlags"));
-    args.emplace_back(std::make_unique<ArgumentPrinter>("pCtx"));
-    args.emplace_back(std::make_unique<ArgumentPrinter>("ppEnum"));
-
-    return args;
+    return std::vector<argument_spec>{
+        {"This"}, {"strQueryLanguage"}, {"strQuery"},
+        {"lFlags"}, {"pCtx"}, {"ppEnum"},
+    };
 }
 
 static std::size_t check_object_name(std::string& query)
@@ -669,9 +664,9 @@ static void check_and_replace_query_string(drakvuf_t drakvuf, drakvuf_trap_info_
             PRINT_DEBUG("[HIDEVM] IWbemServices::ExecQuery: WQL Query string: %s\n", strQuery->contents);
             if (replace_object_name(vmi, info->regs->cr3, addr_strQuery, object_name_pos))
             {
-                fmt::print(plugin->format, "hidevm", drakvuf, info,
-                    keyval("Reason", fmt::Qstr("WMI query spoofed")),
-                    keyval("strQuery", fmt::Qstr(query.c_str()))
+                slog::emit("hidevm", drakvuf, info,
+                    slog::attr("Reason", slog::text("WMI query spoofed")),
+                    slog::attr("strQuery", slog::text(query.c_str()))
                 );
             }
         }
@@ -711,7 +706,7 @@ static void on_dll_hooked(drakvuf_t drakvuf, const dll_view_t* dll, const std::v
     PRINT_DEBUG("[HIDEVM] DLL hooked - done\n");
 }
 
-hidevm::hidevm(drakvuf_t drakvuf, const hidevm_config* config, output_format_t output): pluginex(drakvuf, output), drakvuf(drakvuf), format(output)
+hidevm::hidevm(drakvuf_t drakvuf, const hidevm_config* config): pluginex(drakvuf), drakvuf(drakvuf)
 {
     // Advance boot time
     if (config->delay)

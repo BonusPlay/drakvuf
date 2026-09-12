@@ -103,6 +103,7 @@
  ***************************************************************************/
 
 #include <array>
+#include <format>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -119,7 +120,7 @@
 #include "win.h"
 #include "win_private.h"
 #include "win_minidump.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 #include "plugins/plugin_utils.h"
 
 using namespace procdump2_ns;
@@ -145,12 +146,17 @@ do { \
     ); \
 } while (0)
 
+// Debug traces are not the event stream, so a placeholder is fine here.
+[[maybe_unused]] static const char* debug_name(const std::optional<std::string>& name)
+{
+    return name ? name->c_str() : "<unknown>";
+}
+
 /*****************************************************************************
  *                             Public interface                              *
  *****************************************************************************/
-win_procdump2::win_procdump2(drakvuf_t drakvuf, const procdump2_config* config,
-    output_format_t output)
-    : pluginex(drakvuf, output)
+win_procdump2::win_procdump2(drakvuf_t drakvuf, const procdump2_config* config)
+    : pluginex(drakvuf)
     , timeout{config->timeout}
     , procdump_dir{config->procdump_dir ?: ""}
     , dump_process_on_finish(config->dump_process_on_finish)
@@ -205,13 +211,16 @@ void win_procdump2::start_dump_process(vmi_pid_t pid)
     if (!drakvuf_get_process_by_pid(drakvuf, pid, &process_base, nullptr))
         return;
 
-    auto proc_name = drakvuf_get_process_name(drakvuf, process_base, true);
-    if (proc_name && exclude.match(proc_name))
+    char* name = drakvuf_get_process_name(drakvuf, process_base, true);
+    std::optional<std::string> proc_name;
+    if (name)
+        proc_name = name;
+    g_free(name);
+
+    if (proc_name && exclude.match(*proc_name))
     {
         drakvuf_trap_info_t info = {};
         drakvuf_trap_t trap = {};
-
-        g_free(proc_name);
 
         info.timestamp = g_get_real_time();
         info.trap = &trap;
@@ -231,13 +240,12 @@ void win_procdump2::start_dump_process(vmi_pid_t pid)
     auto ctx = std::make_shared<win_procdump2_ctx>(
             false,
             process_base,
-            std::string(proc_name ?: ""),
+            proc_name,
             pid,
             procdumps_count++,
             procdump_dir,
             dump_compression,
             "FinishAnalysis");
-    g_free(proc_name);
     ctx->need_suspend = true;
     ctx->target.restored = true;
 
@@ -520,7 +528,7 @@ bool win_procdump2::dispatch_pending(drakvuf_trap_info_t* info, std::shared_ptr<
 bool win_procdump2::dispatch_new(drakvuf_trap_info_t* info)
 {
     addr_t target_process_base = 0;
-    std::string target_process_name;
+    std::optional<std::string> target_process_name;
     vmi_pid_t target_process_pid = 0;
     bool is_hosted = false;
     bool new_task = false;
@@ -546,14 +554,14 @@ bool win_procdump2::dispatch_new(drakvuf_trap_info_t* info)
         this->pending[target_process_pid] = ctx;
 
         PROCDUMP2_DEBUG_CTX(info, ctx, "Dispatch new process: %s\n",
-            target_process_name.data()
+            debug_name(target_process_name)
         );
     }
     else
     {
         ctx = this->pending[target_process_pid];
         PROCDUMP2_DEBUG_CTX(info, ctx, "Dispatch pending process on terminate: %s",
-            target_process_name.data()
+            debug_name(target_process_name)
         );
     }
 
@@ -1068,7 +1076,7 @@ bool win_procdump2::dispatch_pending_suspend(drakvuf_trap_info_t* info,
 }
 
 bool win_procdump2::dispatch_new_get_target_info(drakvuf_trap_info_t* info,
-    addr_t& target_process_base, std::string& target_process_name,
+    addr_t& target_process_base, std::optional<std::string>& target_process_name,
     vmi_pid_t& target_process_pid, bool& is_hosted)
 {
     uint64_t handle = drakvuf_get_function_argument(drakvuf, info, 1);
@@ -1078,7 +1086,8 @@ bool win_procdump2::dispatch_new_get_target_info(drakvuf_trap_info_t* info,
     {
         is_hosted = false;
         target_process_base = info->attached_proc_data.base_addr;
-        target_process_name = std::string(info->attached_proc_data.name);
+        if (info->attached_proc_data.name)
+            target_process_name = info->attached_proc_data.name;
         target_process_pid = info->attached_proc_data.pid;
     }
     else
@@ -1099,7 +1108,8 @@ bool win_procdump2::dispatch_new_get_target_info(drakvuf_trap_info_t* info,
 
         // TODO Possibly move after getting correct process base
         char* name = drakvuf_get_process_name(drakvuf, target_process_base, true);
-        target_process_name = std::string(name ?: "");
+        if (name)
+            target_process_name = name;
         g_free(name);
     }
 
@@ -1128,12 +1138,12 @@ bool win_procdump2::dispatch_new_get_target_info(drakvuf_trap_info_t* info,
         is_handled_process(target_process_pid))
     {
         PROCDUMP2_DEBUG(info, "Skip active or finished process %d (%s)",
-            target_process_pid, target_process_name.data()
+            target_process_pid, debug_name(target_process_name)
         );
         return false;
     }
 
-    if (exclude.match(target_process_name))
+    if (target_process_name && exclude.match(*target_process_name))
     {
         // TODO: Print target process name, not current
         print_dump_exclusion(info);
@@ -1549,13 +1559,13 @@ void win_procdump2::finish_task(drakvuf_trap_info_t* info,
 {
     ctx->writer->finish();
     save_file_metadata(ctx, &info->attached_proc_data);
-    fmt::print(m_output_format, "procdump", drakvuf, info,
-        keyval("TargetPID", fmt::Nval(ctx->target_process_pid)),
-        keyval("TargetName", fmt::Estr(ctx->target_process_name)),
-        keyval("DumpReason", fmt::Estr(ctx->dump_reason)),
-        keyval("DumpSize", fmt::Nval(ctx->size)),
-        keyval("SN", fmt::Nval(ctx->idx)),
-        keyval("Status", fmt::Estr(ctx->status()))
+    slog::emit("procdump", drakvuf, info,
+        slog::attr("TargetPID", slog::number(ctx->target_process_pid)),
+        slog::attr("TargetName", slog::text(ctx->target_process_name)),
+        slog::attr("DumpReason", slog::text(ctx->dump_reason)),
+        slog::attr("DumpSize", slog::number(ctx->size)),
+        slog::attr("SN", slog::number(ctx->idx)),
+        slog::attr("Status", slog::text(ctx->status()))
     );
 
     this->finished.insert(ctx->target_process_pid);
@@ -1571,8 +1581,8 @@ void win_procdump2::print_dump_exclusion(drakvuf_trap_info_t* info)
         , info->attached_proc_data.pid
         , info->attached_proc_data.name
     );
-    fmt::print(m_output_format, "procdump_skip", drakvuf, info,
-        keyval("Message", fmt::Rstr("Excluded by filter"))
+    slog::emit("procdump_skip", drakvuf, info,
+        slog::attr("Message", slog::text("Excluded by filter"))
     );
 }
 
@@ -1849,33 +1859,24 @@ void win_procdump2::restore_worker(drakvuf_trap_info_t* info,
 void win_procdump2::save_file_metadata(std::shared_ptr<win_procdump2_ctx> ctx,
     proc_data_t* proc_data)
 {
-    FILE* fp = fopen((procdump_dir + "/"s + ctx->data_file_name + ".metadata"s).data(), "w");
-    if (!fp)
-    {
+    slog::keyval_array record;
+    record.push_back(slog::attr("DumpSize", slog::hex(ctx->size)));
+    record.push_back(slog::attr("PID", slog::number(proc_data->pid)));
+    record.push_back(slog::attr("PPID", slog::number(proc_data->ppid)));
+    record.push_back(slog::attr("ProcessName", slog::text(proc_data->name)));
+    record.push_back(slog::attr("TargetPID", slog::number(ctx->target_process_pid)));
+    record.push_back(slog::attr("TargetName", slog::text(ctx->target_process_name)));
+    record.push_back(slog::attr("Compression", slog::text(dump_compression_name(dump_compression))));
+    record.push_back(slog::attr("Status", slog::text(ctx->status())));
+    record.push_back(slog::attr("DataFileName", slog::text(ctx->data_file_name.data())));
+    record.push_back(slog::attr("SequenceNumber", slog::number(ctx->idx)));
+
+    if (!slog::write_record(std::format("{}/{}.metadata", procdump_dir, ctx->data_file_name), record))
         PRINT_DEBUG("[PROCDUMP] [%d:%d] [%d:%d] "
-            "Failed to open metadata file\n"
+            "Failed to write metadata file\n"
             , proc_data->pid, proc_data->tid
             , ctx->target_process_pid, to_int(ctx->stage())
         );
-        return;
-    }
-
-    json_object* jobj = json_object_new_object();
-    json_object_object_add(jobj, "DumpSize", json_object_new_string_fmt("0x%" PRIx64, ctx->size));
-    json_object_object_add(jobj, "PID", json_object_new_int(proc_data->pid));
-    json_object_object_add(jobj, "PPID", json_object_new_int(proc_data->ppid));
-    json_object_object_add(jobj, "ProcessName", json_object_new_string(proc_data->name));
-    json_object_object_add(jobj, "TargetPID", json_object_new_int(ctx->target_process_pid));
-    json_object_object_add(jobj, "TargetName", json_object_new_string(ctx->target_process_name.data()));
-    json_object_object_add(jobj, "Compression", json_object_new_string(dump_compression_name(dump_compression)));
-    json_object_object_add(jobj, "Status", json_object_new_string(ctx->status()));
-    json_object_object_add(jobj, "DataFileName", json_object_new_string(ctx->data_file_name.data()));
-    json_object_object_add(jobj, "SequenceNumber", json_object_new_int(ctx->idx));
-
-    fprintf(fp, "%s\n", json_object_get_string(jobj));
-    fclose(fp);
-
-    json_object_put(jobj);
 }
 
 bool win_procdump2::start_copy_memory(drakvuf_trap_info_t* info, std::shared_ptr<win_procdump2_ctx> ctx)

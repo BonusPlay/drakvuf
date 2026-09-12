@@ -108,11 +108,11 @@
 #include "fileextractor.h"
 #include "win.h"
 
-fileextractor::fileextractor(drakvuf_t drakvuf, const fileextractor_config* config, output_format_t output) : pluginex(drakvuf, output)
+fileextractor::fileextractor(drakvuf_t drakvuf, const fileextractor_config* config) : pluginex(drakvuf)
 {
     auto os = drakvuf_get_os_type(drakvuf);
     if (os == VMI_OS_WINDOWS)
-        this->wf = std::make_unique<win_fileextractor>(drakvuf, config, output);
+        this->wf = std::make_unique<win_fileextractor>(drakvuf, config);
     else
     {
         PRINT_DEBUG("[FILEEXTRACTOR] Other platforms no supported yet\n");

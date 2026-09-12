@@ -110,7 +110,6 @@ class delaymon: public plugin
 {
 public:
     drakvuf_t drakvuf;
-    output_format_t format;
 
     drakvuf_trap_t trap =
     {
@@ -124,7 +123,7 @@ public:
         .ah_cb = nullptr
     };
 
-    delaymon(drakvuf_t drakvuf, output_format_t output);
+    delaymon(drakvuf_t drakvuf);
     ~delaymon() = default;
     virtual bool stop_impl() override;
 };

@@ -105,13 +105,14 @@
 #include <libvmi/libvmi.h>
 
 #include "crashmon.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 
 static void print_crashed_process_information(drakvuf_t drakvuf, drakvuf_trap_info_t* info, vmi_pid_t pid, vmi_pid_t ppid, const char* name)
 {
-    crashmon* d = static_cast<crashmon*>(info->trap->data);
-
-    fmt::print(d->format, "crashmon", drakvuf, info);
+    slog::emit("crashmon", drakvuf, info,
+        slog::attr("CrashedPID", pid),
+        slog::attr("CrashedPPID", ppid),
+        slog::attr("CrashedProcessName", name));
 }
 
 static event_response_t check_crashreporter(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
@@ -121,8 +122,7 @@ static event_response_t check_crashreporter(drakvuf_t drakvuf, drakvuf_trap_info
     {
         addr_t eprocess = 0;
         vmi_pid_t ppid = 0;
-        const char* name_unknown = "<UNKNOWN>";
-        const char* name = name_unknown;
+        const char* name = nullptr;
         char* tmp = NULL;
 
         if (drakvuf_find_process(drakvuf, pid, nullptr, &eprocess))
@@ -146,8 +146,7 @@ static event_response_t check_crashreporter(drakvuf_t drakvuf, drakvuf_trap_info
     return 0;
 }
 
-crashmon::crashmon(drakvuf_t drakvuf, output_format_t output)
-    : format(output)
+crashmon::crashmon(drakvuf_t drakvuf)
 {
     /* Setup trap for thread switch */
     trap.cb = check_crashreporter;

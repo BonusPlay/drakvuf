@@ -103,7 +103,6 @@
  ***************************************************************************/
 
 #include "utils.hpp"
-#include "printers/printers.hpp"
 
 #include <algorithm>
 #include <iterator>
@@ -160,52 +159,32 @@ std::string parse_token(std::stringstream& ss)
     return *maybe_token;
 }
 
-std::unique_ptr<ArgumentPrinter> make_arg_printer(
-    const PrinterConfig& config,
-    const std::string& type,
-    const std::string& name)
+argument_kind parse_argument_kind(const std::string& type)
 {
     if (type == "lpstr" || type == "lpcstr" || type == "lpctstr")
-    {
-        return std::make_unique<AsciiPrinter>(name, config);
-    }
-    else if (type == "lpcwstr" || type == "lpwstr" || type == "bstr")
-    {
-        return std::make_unique<WideStringPrinter>(name, config);
-    }
-    else if (type == "punicode_string")
-    {
-        return std::make_unique<UnicodePrinter>(name, config);
-    }
-    else if (type == "pulong")
-    {
-        return std::make_unique<UlongPrinter>(name, config);
-    }
-    else if (type == "pulonglong")
-    {
-        return std::make_unique<UlongLongPrinter>(name, config);
-    }
-    else if (type == "lpvoid*")
-    {
-        return std::make_unique<PointerToPointerPrinter>(name, config);
-    }
-    else if (type == "refclsid" || type == "refiid")
-    {
-        return std::make_unique<GuidPrinter>(name, config);
-    }
-    else if (type == "binary16")
-    {
-        return std::make_unique<Binary16StringPrinter>(name, config);
-    }
-
-    return std::make_unique<ArgumentPrinter>(name, config);
+        return argument_kind::c_string;
+    if (type == "lpcwstr" || type == "lpwstr" || type == "bstr")
+        return argument_kind::wide_string;
+    if (type == "punicode_string")
+        return argument_kind::unicode_string;
+    if (type == "pulong")
+        return argument_kind::uint32_pointer;
+    if (type == "pulonglong")
+        return argument_kind::uint64_pointer;
+    if (type == "lpvoid*")
+        return argument_kind::pointer_pointer;
+    if (type == "refclsid" || type == "refiid")
+        return argument_kind::guid;
+    if (type == "binary16")
+        return argument_kind::bytes16;
+    return argument_kind::number;
 }
 
-std::vector<std::unique_ptr<ArgumentPrinter>> parse_arguments(
-        const PrinterConfig& config,
+std::vector<argument_spec> parse_arguments(
+        const argument_options& config,
         std::stringstream& ss)
 {
-    std::vector<std::unique_ptr<ArgumentPrinter>> argument_printers;
+    std::vector<argument_spec> arguments;
 
     for (size_t arg_idx = 0; ; arg_idx++)
     {
@@ -228,16 +207,16 @@ std::vector<std::unique_ptr<ArgumentPrinter>> parse_arguments(
             arg_type = arg.substr(pos + 1);
         }
 
-        argument_printers.emplace_back(make_arg_printer(config, arg_type, arg_name));
+        arguments.push_back({std::move(arg_name), parse_argument_kind(arg_type), config});
     }
-    return argument_printers;
+    return arguments;
 }
 
 } // namespace
 
 plugin_target_config_entry_t parse_entry(
     std::stringstream& ss,
-    PrinterConfig& config)
+    const argument_options& config)
 {
     plugin_target_config_entry_t entry{};
 
@@ -279,7 +258,7 @@ plugin_target_config_entry_t parse_entry(
         }
     }
 
-    entry.argument_printers = parse_arguments(config, ss);
+    entry.arguments = parse_arguments(config, ss);
 
     return entry;
 }

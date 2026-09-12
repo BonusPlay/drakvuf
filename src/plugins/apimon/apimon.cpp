@@ -107,7 +107,7 @@
 #include <inttypes.h>
 #include <assert.h>
 
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 #include "apimon.h"
 #include "crypto.h"
 
@@ -147,44 +147,44 @@ void apimon::usermode_print(drakvuf_trap_info* info, std::vector<uint64_t>& args
     if (!strcmp(info->trap->name, "CryptGenKey"))
         extra_data = CryptGenKey_hook(drakvuf, info, args);
 
-    std::optional<fmt::Qstr<std::string>> clsid;
+    std::optional<slog::value> clsid;
 
     if (!target->clsid.empty())
-        clsid = fmt::Qstr(target->clsid);
+        clsid = slog::text(target->clsid);
 
-    std::vector<fmt::Rstr<std::string>> fmt_args{};
+    std::vector<slog::keyval> fmt_args{};
     {
-        const auto& printers = target->argument_printers;
-        for (auto [arg, printer] = std::tuple(std::cbegin(args), std::cbegin(printers));
-            arg != std::cend(args) && printer != std::cend(printers);
-            ++arg, ++printer)
+        const auto& specs = target->arguments;
+        for (auto [arg, spec] = std::tuple(std::cbegin(args), std::cbegin(specs));
+            arg != std::cend(args) && spec != std::cend(specs);
+            ++arg, ++spec)
         {
-            fmt_args.push_back(fmt::Rstr((*printer)->print(drakvuf, info, *arg)));
+            fmt_args.push_back(slog::attr(spec->name, decode_argument(drakvuf, info, *arg, *spec)));
         }
     }
 
-    std::map<std::string, fmt::Qstr<std::string>> fmt_extra{};
+    std::map<std::string, slog::value> fmt_extra{};
     for (const auto& extra : extra_data)
     {
-        fmt_extra.insert(std::make_pair(extra.first, fmt::Qstr(extra.second)));
+        fmt_extra.insert(std::make_pair(extra.first, slog::text(extra.second)));
     }
 
     auto module_name = resolve_module(drakvuf, info->proc_data.base_addr, info->regs->rip, info->proc_data.pid);
 
-    std::optional<fmt::Qstr<std::string>> module_opt;
+    std::optional<slog::value> module_opt;
     if (module_name.has_value())
     {
         module_opt = module_name.value();
     }
 
-    fmt::print(m_output_format, "apimon", drakvuf, info,
-        keyval("Event", fmt::Rstr("api_called")),
-        keyval("CLSID", clsid),
-        keyval("CalledFrom", fmt::Xval(info->regs->rip)),
-        keyval("ReturnValue", fmt::Xval(info->regs->rax)),
-        keyval("FromModule", module_opt),
-        keyval("Arguments", fmt_args),
-        keyval("Extra", fmt_extra)
+    slog::emit("apimon", drakvuf, info,
+        slog::attr("Event", slog::text("api_called")),
+        slog::attr("CLSID", clsid),
+        slog::attr("CalledFrom", slog::hex(info->regs->rip)),
+        slog::attr("ReturnValue", slog::hex(info->regs->rax)),
+        slog::attr("FromModule", module_opt),
+        slog::attr("Arguments", fmt_args),
+        slog::attr("Extra", fmt_extra)
     );
 }
 
@@ -232,8 +232,8 @@ static event_response_t usermode_hook_cb(drakvuf_t drakvuf, drakvuf_trap_info* i
     }
 
     std::vector<uint64_t> arguments;
-    arguments.reserve(target->argument_printers.size());
-    for (size_t i = 1; i <= target->argument_printers.size(); i++)
+    arguments.reserve(target->arguments.size());
+    for (size_t i = 1; i <= target->arguments.size(); i++)
     {
         uint64_t argument = drakvuf_get_function_argument(drakvuf, info, i);
         arguments.push_back(argument);
@@ -262,40 +262,29 @@ static event_response_t usermode_hook_cb(drakvuf_t drakvuf, drakvuf_trap_info* i
 static void print_addresses(drakvuf_t drakvuf, apimon* plugin, const dll_view_t* dll, const std::vector<hook_target_view_t>& targets)
 {
     unicode_string_t* dll_name;
-    json_object* j_root;
-    json_object* j_rvas;
-    vmi_pid_t pid;
+    vmi_pid_t pid = 0;
+    std::vector<slog::keyval> rvas;
     auto vmi = vmi_lock_guard(drakvuf);
 
     dll_name = drakvuf_read_unicode_va(drakvuf, dll->mmvad.file_name_ptr, 0);
-
-    if (plugin->m_output_format != OUTPUT_JSON)
-        goto out;
 
     if (!dll_name || !dll_name->contents)
         goto out;
 
     vmi_dtb_to_pid(vmi, dll->dtb, &pid);
 
-    j_root = json_object_new_object();
-    j_rvas = json_object_new_object();
-
     for (auto const& target : targets)
     {
         if (target.state == HOOK_OK)
-            json_object_object_add(j_rvas, target.target_name.c_str(), json_object_new_int(target.offset));
+            rvas.push_back(slog::attr(target.target_name, target.offset));
     }
 
-    json_object_object_add(j_root, "Plugin", json_object_new_string("apimon"));
-    json_object_object_add(j_root, "Event", json_object_new_string("dll_loaded"));
-    json_object_object_add(j_root, "Rva", j_rvas);
-    json_object_object_add(j_root, "DllBase", json_object_new_string_fmt("0x%lx", dll->real_dll_base));
-    json_object_object_add(j_root, "DllName", json_object_new_string((const char*)dll_name->contents));
-    json_object_object_add(j_root, "PID", json_object_new_int(pid));
-
-    printf("%s\n", json_object_to_json_string(j_root));
-
-    json_object_put(j_root);
+    slog::emit("apimon", drakvuf, nullptr,
+        slog::attr("Event", slog::text("dll_loaded")),
+        slog::attr("Rva", std::move(rvas)),
+        slog::attr("DllBase", slog::hex(dll->real_dll_base)),
+        slog::attr("DllName", dll_name),
+        slog::attr("PID", pid));
 
 out:
     if (dll_name)
@@ -312,11 +301,11 @@ static void on_dll_discovered(drakvuf_t drakvuf, const std::string& dll_name, co
         vmi_dtb_to_pid(vmi, dll->dtb, &pid);
     }
 
-    fmt::print(plugin->m_output_format, "apimon", drakvuf, nullptr,
-        keyval("Event", fmt::Rstr("dll_discovered")),
-        keyval("DllName", fmt::Estr(dll_name)),
-        keyval("DllBase", fmt::Xval(dll->real_dll_base)),
-        keyval("PID", fmt::Nval(pid))
+    slog::emit("apimon", drakvuf, nullptr,
+        slog::attr("Event", slog::text("dll_discovered")),
+        slog::attr("DllName", slog::text(dll_name)),
+        slog::attr("DllBase", slog::hex(dll->real_dll_base)),
+        slog::attr("PID", slog::number(pid))
     );
 
     plugin->wanted_hooks.visit_hooks_for(dll_name, [&](const auto& e)
@@ -382,8 +371,8 @@ std::optional<std::string> apimon::resolve_module(drakvuf_t drakvuf, addr_t proc
     return {};
 }
 
-apimon::apimon(drakvuf_t drakvuf, const apimon_config* c, output_format_t output)
-    : pluginex(drakvuf, output)
+apimon::apimon(drakvuf_t drakvuf, const apimon_config* c)
+    : pluginex(drakvuf)
 {
     if (!drakvuf_are_userhooks_supported(drakvuf))
     {

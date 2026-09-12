@@ -107,22 +107,31 @@
 
 #include <string>
 #include <optional>
+#include <vector>
+#include "slog/slog.hpp"
 #include "plugins/plugin_utils.h"
 #include "plugins/plugins_ex.h"
 
 namespace filetracer_ns
 {
 
+struct acl_entry_t
+{
+    std::string type;
+    slog::value access_mask;
+    std::string sid;
+};
+
 struct win_objattrs_t
 {
     std::string file_path;
-    std::string obj_attrs;
+    slog::value obj_attrs;
 
-    std::string security_flags;
+    std::optional<slog::value> security_flags;
     std::string owner;
     std::string group;
-    std::string sacl;
-    std::string dacl;
+    std::vector<acl_entry_t> sacl;
+    std::vector<acl_entry_t> dacl;
 };
 
 struct file_basic_information_t
@@ -131,12 +140,12 @@ struct file_basic_information_t
     uint64_t last_access_time;
     uint64_t last_write_time;
     uint64_t change_time;
-    std::string file_attributes;
+    slog::value file_attributes;
 };
 
 struct file_disposition_information_ex_t
 {
-    std::string flags;
+    slog::value flags;
 };
 
 struct file_network_open_information_t
@@ -147,7 +156,7 @@ struct file_network_open_information_t
     uint64_t change_time;
     uint64_t allocation_size;
     uint64_t end_of_file;
-    std::string file_attributes;
+    slog::value file_attributes;
 };
 
 struct win_data : PluginResult
@@ -206,12 +215,12 @@ struct linux_data : PluginResult
     int file_handle;
     int permissions;
 
-    std::string filename;
-    std::string flags;
-    std::string modes;
+    std::optional<std::string> filename;
+    std::optional<slog::value> flags;
+    std::optional<slog::value> modes;
     std::optional<uint32_t> uid;
     std::optional<uint32_t> gid;
-    std::map<std::string, std::string> args;
+    std::map<std::string, slog::value> args;
 };
 
 struct pool_header_x86

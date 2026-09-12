@@ -115,9 +115,9 @@ struct librarymon_config
 class librarymon : public pluginex
 {
 public:
-    librarymon(drakvuf_t drakvuf, const librarymon_config* config, output_format_t output);
+    librarymon(drakvuf_t drakvuf, const librarymon_config* config);
 
-    void print_call_info(drakvuf_t drakvuf, drakvuf_trap_info_t* info, const unicode_string_t& name, const unicode_string_t& path);
+    void print_call_info(drakvuf_t drakvuf, drakvuf_trap_info_t* info, const unicode_string& name, const unicode_string& path);
 };
 
 #endif // LIBRARYMON_H

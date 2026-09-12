@@ -106,7 +106,7 @@
 #include <libvmi/libvmi.h>
 
 #include "exmon.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 
 enum offset
 {
@@ -179,7 +179,7 @@ static event_response_t cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
     ctx.translate_mechanism = VMI_TM_PROCESS_DTB;
     ctx.dtb = info->regs->cr3;
 
-    std::optional<fmt::Qstr<const char*>> proc_name_opt;
+    std::optional<slog::value> proc_name_opt;
 
     if (e->pm != VMI_PM_IA32E)
     {
@@ -224,23 +224,23 @@ static event_response_t cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
         memcpy(&hwesp, trap_frame+e->offsets[KTRAP_FRAME_HWESP], sizeof(uint32_t));
 
         if (previous_mode == 1)
-            proc_name_opt = fmt::Qstr(info->attached_proc_data.base_addr ? info->attached_proc_data.name : "NOPROC");
+            proc_name_opt = slog::text(info->attached_proc_data.base_addr ? info->attached_proc_data.name : nullptr);
 
-        fmt::print(e->format, "exmon", drakvuf, info,
-            keyval("RSP", fmt::Xval(info->regs->rsp, false)),
-            keyval("ExceptionRecord", fmt::Xval(exception_record)),
-            keyval("ExceptionCode", fmt::Xval(exception_code)),
-            keyval("FirstChance", fmt::Nval(first_chance)),
-            keyval("EIP", fmt::Xval(eip, false)),
-            keyval("EAX", fmt::Xval(eax, false)),
-            keyval("EBX", fmt::Xval(ebx, false)),
-            keyval("ECX", fmt::Xval(ecx, false)),
-            keyval("EDX", fmt::Xval(edx, false)),
-            keyval("EDI", fmt::Xval(edi, false)),
-            keyval("ESI", fmt::Xval(esi, false)),
-            keyval("EBP", fmt::Xval(ebp, false)),
-            keyval("ESP", fmt::Xval(hwesp, false)),
-            keyval("Name", proc_name_opt)
+        slog::emit("exmon", drakvuf, info,
+            slog::attr("RSP", slog::hex(info->regs->rsp)),
+            slog::attr("ExceptionRecord", slog::hex(exception_record)),
+            slog::attr("ExceptionCode", slog::hex(exception_code)),
+            slog::attr("FirstChance", slog::number(first_chance)),
+            slog::attr("EIP", slog::hex(eip)),
+            slog::attr("EAX", slog::hex(eax)),
+            slog::attr("EBX", slog::hex(ebx)),
+            slog::attr("ECX", slog::hex(ecx)),
+            slog::attr("EDX", slog::hex(edx)),
+            slog::attr("EDI", slog::hex(edi)),
+            slog::attr("ESI", slog::hex(esi)),
+            slog::attr("EBP", slog::hex(ebp)),
+            slog::attr("ESP", slog::hex(hwesp)),
+            slog::attr("Name", proc_name_opt)
         );
     }
     else
@@ -278,29 +278,29 @@ static event_response_t cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
 
         auto previous_mode = info->regs->r9 & 0xfful;
         if (previous_mode == 1)
-            proc_name_opt = fmt::Qstr(info->attached_proc_data.base_addr ? info->attached_proc_data.name : "NOPROC");
+            proc_name_opt = slog::text(info->attached_proc_data.base_addr ? info->attached_proc_data.name : nullptr);
 
         exception_record = info->regs->rcx;
 
-        fmt::print(e->format, "exmon", drakvuf, info,
-            keyval("RSP", fmt::Nval(info->regs->rsp)),
-            keyval("ExceptionRecord", fmt::Xval(exception_record)),
-            keyval("ExceptionCode", fmt::Xval(exception_code)),
-            keyval("FirstChance", fmt::Nval(first_chance & 1)),
-            keyval("RIP", fmt::Xval(rip, false)),
-            keyval("RAX", fmt::Xval(rax, false)),
-            keyval("RBX", fmt::Xval(rbx, false)),
-            keyval("RCX", fmt::Xval(rcx, false)),
-            keyval("RDX", fmt::Xval(rdx, false)),
-            keyval("RDI", fmt::Xval(rdi, false)),
-            keyval("RSI", fmt::Xval(rsi, false)),
-            keyval("RBP", fmt::Xval(rbp, false)),
-            keyval("RSP", fmt::Xval(rsp, false)),
-            keyval("R8", fmt::Xval(r8, false)),
-            keyval("R9", fmt::Xval(r9, false)),
-            keyval("R10", fmt::Xval(r10, false)),
-            keyval("R11", fmt::Xval(r11, false)),
-            keyval("Name", proc_name_opt)
+        slog::emit("exmon", drakvuf, info,
+            slog::attr("RSP", slog::number(info->regs->rsp)),
+            slog::attr("ExceptionRecord", slog::hex(exception_record)),
+            slog::attr("ExceptionCode", slog::hex(exception_code)),
+            slog::attr("FirstChance", slog::number(first_chance & 1)),
+            slog::attr("RIP", slog::hex(rip)),
+            slog::attr("RAX", slog::hex(rax)),
+            slog::attr("RBX", slog::hex(rbx)),
+            slog::attr("RCX", slog::hex(rcx)),
+            slog::attr("RDX", slog::hex(rdx)),
+            slog::attr("RDI", slog::hex(rdi)),
+            slog::attr("RSI", slog::hex(rsi)),
+            slog::attr("RBP", slog::hex(rbp)),
+            slog::attr("RSP", slog::hex(rsp)),
+            slog::attr("R8", slog::hex(r8)),
+            slog::attr("R9", slog::hex(r9)),
+            slog::attr("R10", slog::hex(r10)),
+            slog::attr("R11", slog::hex(r11)),
+            slog::attr("Name", proc_name_opt)
         );
     }
 
@@ -310,8 +310,7 @@ done:
     return 0;
 }
 
-exmon::exmon(drakvuf_t drakvuf, output_format_t output)
-    : format{output}
+exmon::exmon(drakvuf_t drakvuf)
 {
     if ( !drakvuf_get_kernel_symbol_rva(drakvuf, "KiDispatchException", &this->trap.breakpoint.rva) )
         throw -1;

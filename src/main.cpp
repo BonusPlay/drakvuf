@@ -119,6 +119,7 @@
 
 #include "drakvuf.h"
 #include "exitcodes.h"
+#include "slog/slog.hpp"
 
 static int is_interrupted = 0;
 static std::unique_ptr<drakvuf_c> drakvuf;
@@ -209,7 +210,7 @@ static void print_usage()
         "\t --terminate               Terminate injected process\n"
         "\t --termination-timeout     Timeout to wait for process termination (in seconds)\n"
         "\t -t <timeout>              Timeout (in seconds)\n"
-        "\t -o <format>               Output format (default, csv, kv, or json)\n"
+        "\t -o <format>               Output format (kv or json, default: kv)\n"
         "\t -x <plugin>               Don't activate the specified plugin\n"
         "\t --wait-stop-plugins <timeout>\n"
         "\t                           Wait for plugins to stop before termination loop\n"
@@ -436,7 +437,7 @@ int main(int argc, char** argv)
     char* shellexec_verb = nullptr;
     vmi_pid_t injection_pid = -1;
     uint32_t injection_thread = 0;
-    output_format_t output = OUTPUT_DEFAULT;
+    output_format_t output = OUTPUT_KV;
     bool plugin_list[] = {[0 ... __DRAKVUF_PLUGIN_LIST_MAX-1] = 1};
     bool wait_stop_plugins = false;
     int wait_stop_plugins_timeout = 0;
@@ -726,12 +727,15 @@ int main(int argc, char** argv)
                 options.dump_folder = optarg;
                 break;
             case 'o':
-                if (!strncmp(optarg, "csv", 3))
-                    output = OUTPUT_CSV;
-                if (!strncmp(optarg, "kv", 2))
+                if (!strcmp(optarg, "kv"))
                     output = OUTPUT_KV;
-                if (!strncmp(optarg, "json", 4))
+                else if (!strcmp(optarg, "json"))
                     output = OUTPUT_JSON;
+                else
+                {
+                    fprintf(stderr, "Unknown output format: %s (expected kv or json)\n", optarg);
+                    return drakvuf_exit_code_t::FAIL;
+                }
                 break;
             case 'x':
                 if (!disable_plugin(optarg, plugin_list))
@@ -1114,6 +1118,11 @@ int main(int argc, char** argv)
     sigaction(SIGALRM, &act_timer, nullptr);
 
     PRINT_DEBUG("Starting DRAKVUF initialization\n");
+
+    if (output == OUTPUT_JSON)
+        slog::set_default_json();
+    else
+        slog::set_default_kv();
 
     try
     {

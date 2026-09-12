@@ -109,11 +109,11 @@
 class etwmon : public pluginex
 {
 public:
-    etwmon(drakvuf_t drakvuf, output_format_t output);
+    etwmon(drakvuf_t drakvuf);
     virtual bool stop_impl() override;
 
     etwmon(const etwmon& other);
-    void report(drakvuf_t drakvuf, const char* type, const char* name, const char* action, addr_t value = 0, addr_t prev_value = 0);
+    void report(drakvuf_t drakvuf, const char* type, const slog::value& name, const char* action, addr_t value = 0, addr_t prev_value = 0);
 
     bool is_supported(drakvuf_t drakvuf, bool quite);
     void enumerate_loggers(vmi_instance_t vmi);
@@ -121,7 +121,6 @@ public:
     void enumerate_callbacks(vmi_instance_t vmi);
     void enumerate_handles(vmi_instance_t vmi);
 
-    output_format_t format;
     win_build_info_t winver;
     size_t address_width;
 

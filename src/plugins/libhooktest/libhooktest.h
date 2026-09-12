@@ -111,7 +111,7 @@ event_response_t cr3_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info);
 class libhooktest : public pluginex
 {
 public:
-    libhooktest(drakvuf_t drakvuf, output_format_t output);
+    libhooktest(drakvuf_t drakvuf);
 
     event_response_t protectVirtualMemoryCb(drakvuf_t, drakvuf_trap_info*);
     event_response_t protectVirtualMemoryRetCb(drakvuf_t, drakvuf_trap_info*);

@@ -116,7 +116,7 @@
 #include <err.h>
 
 #include "plugins/plugins.h"
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 
 #include "private.h"
 #include "debugmon.h"
@@ -140,15 +140,10 @@ static const char* debug_type[] =
 
 event_response_t debug_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
 {
-
-    debugmon* s = (debugmon*)info->trap->data;
-
-    fmt::print(s->format, "debugmon", drakvuf, info,
-        keyval("VCPU", fmt::Nval(info->vcpu)),
-        keyval("CR3", fmt::Nval(info->regs->cr3)),
-        keyval("RIP", fmt::Xval(info->regs->rip)),
-        keyval("DebugType", fmt::Nval(info->debug->type)),
-        keyval("DebugTypeStr", fmt::Qstr(debug_type[info->debug->type]))
+    slog::emit("debugmon", drakvuf, info,
+        slog::attr("RIP", slog::hex(info->regs->rip)),
+        slog::attr("DebugType", slog::number(info->debug->type)),
+        slog::attr("DebugTypeStr", slog::text(debug_type[info->debug->type]))
     );
 
     return 0;
@@ -156,9 +151,8 @@ event_response_t debug_cb(drakvuf_t drakvuf, drakvuf_trap_info_t* info)
 
 /* ----------------------------------------------------- */
 
-debugmon::debugmon(drakvuf_t _drakvuf, output_format_t _output)
-    : format{_output}
-    , drakvuf{_drakvuf}
+debugmon::debugmon(drakvuf_t _drakvuf)
+    : drakvuf{_drakvuf}
 {
     this->debug.cb = debug_cb;
     this->debug.data = (void*)this;

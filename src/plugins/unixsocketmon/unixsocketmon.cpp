@@ -107,28 +107,7 @@
 
 #include "unixsocketmon.h"
 #include "private.h"
-#include "plugins/output_format.h"
-
-static bool is_printable_string(const std::vector<uint8_t>& message)
-{
-    if (message.empty() || message.front() == 0x00)
-        return false;
-
-    // symbol codes from 0x00 to 0x1f excluding \t, \r, \n
-    std::vector<uint8_t> unprintable
-    {
-        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0b,
-        0x0c, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16,
-        0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f
-    };
-    auto it = std::find_first_of(message.begin(), message.end(), unprintable.begin(), unprintable.end());
-
-    // termination zeroes check
-    return std::all_of(it, message.end(), [](uint8_t i)
-    {
-        return i == 0x00;
-    });
-}
+#include "slog/slog.hpp"
 
 bool unixsocketmon::get_socket_family_type(drakvuf_t drakvuf, drakvuf_trap_info_t* info, uint32_t* family_type)
 {
@@ -218,40 +197,17 @@ event_response_t unixsocketmon::sock_send_msg_cb(drakvuf_t drakvuf, drakvuf_trap
     uint64_t size = 0;
     auto message = get_socket_message(drakvuf, info, &size);
 
-    unicode_string_t msg =
-    {
-        .length = message.size(),
-        .contents = message.data(),
-        .encoding = "UTF-8"
-    };
-
-    unicode_string_t out;
-    status_t rc = vmi_convert_str_encoding(&msg, &out, "UTF-8");
-
-    if (VMI_FAILURE == rc || !is_printable_string(message))
-    {
-        fmt::print(this->m_output_format, "unixsocketmon", drakvuf, info,
-            keyval("Type", fmt::Rstr(socket_family_str)),
-            keyval("Size", fmt::Nval(size)),
-            keyval("Value", fmt::BinaryString(message.data(), message.size()))
-        );
-    }
-    else
-    {
-        fmt::print(this->m_output_format, "unixsocketmon", drakvuf, info,
-            keyval("Type", fmt::Rstr(socket_family_str)),
-            keyval("Size", fmt::Nval(size)),
-            keyval("Value", fmt::Estr(reinterpret_cast<char*>(out.contents)))
-        );
-    }
-
-    g_free(out.contents);
+    slog::emit("unixsocketmon", drakvuf, info,
+        slog::attr("Type", slog::text(socket_family_str)),
+        slog::attr("Size", slog::number(size)),
+        slog::attr("Value", slog::bytes(message.data(), message.size()))
+    );
 
     return VMI_EVENT_RESPONSE_NONE;
 }
 
-unixsocketmon::unixsocketmon(drakvuf_t drakvuf, const unixsocketmon_config* config, output_format_t output)
-    :pluginex(drakvuf, output), print_max_size{config->print_max_size}
+unixsocketmon::unixsocketmon(drakvuf_t drakvuf, const unixsocketmon_config* config)
+    :pluginex(drakvuf), print_max_size{config->print_max_size}
 {
     if (!drakvuf_get_kernel_struct_member_rva(drakvuf, "socket", "ops", &socket_ops))
     {

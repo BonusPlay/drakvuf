@@ -129,7 +129,7 @@ private:
     const bool abort_on_power_off;
 
 public:
-    linux_rebootmon(drakvuf_t drakvuf, const rebootmon_config* c, output_format_t output);
+    linux_rebootmon(drakvuf_t drakvuf, const rebootmon_config* c);
     linux_rebootmon(const linux_rebootmon&) = delete;
     linux_rebootmon& operator=(const linux_rebootmon&) = delete;
 };

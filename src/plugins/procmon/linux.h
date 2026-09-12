@@ -105,8 +105,7 @@
 #ifndef PROCMON_LINUX_H
 #define PROCMON_LINUX_H
 
-#include "plugins/output_format.h"
-#include "plugins/output_format/common.h"
+#include "slog/slog.hpp"
 
 #include "private.h"
 #include <unordered_set>
@@ -154,19 +153,19 @@ public:
     void print_info(
         drakvuf_t drakvuf,
         drakvuf_trap_info_t* info,
-        std::vector<std::pair<std::string, std::variant<fmt::Nval<int>, fmt::Nval<unsigned int>, fmt::Estr<std::string>>>> extra_args
+        std::vector<slog::keyval> extra_args
     );
     void configure_filter(const procmon_config* config);
     bool read_procmon_filter(const char* filter_file);
 
     // TODO: make more clean
     bool get_struct_field_pointer(drakvuf_t drakvuf, drakvuf_trap_info_t* info, addr_t struct_addr, int offset_field, addr_t* value);
-    std::string get_string_from_struct(drakvuf_t drakvuf, drakvuf_trap_info_t* info, addr_t struct_base, int offset_field);
+    std::optional<std::string> get_string_from_struct(drakvuf_t drakvuf, drakvuf_trap_info_t* info, addr_t struct_base, int offset_field);
 
     procmon_ns::task_creds get_current_credentials(drakvuf_t drakvuf, drakvuf_trap_info_t* info);
     bool get_cred_value(drakvuf_t drakvuf, drakvuf_trap_info_t* info, addr_t struct_cred, int offset_field, uint32_t* value);
 
-    linux_procmon(drakvuf_t drakvuf, const procmon_config* config, output_format_t output);
+    linux_procmon(drakvuf_t drakvuf, const procmon_config* config);
     linux_procmon(const linux_procmon&) = delete;
     linux_procmon& operator=(const linux_procmon&) = delete;
 };

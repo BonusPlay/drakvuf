@@ -144,7 +144,7 @@ public:
     wanted_hooks_t wanted_hooks_32;
     wanted_hooks_t wanted_hooks_64;
 
-    memdump(drakvuf_t drakvuf, const memdump_config* config, output_format_t output);
+    memdump(drakvuf_t drakvuf, const memdump_config* config);
     memdump(const memdump&) = delete;
     memdump& operator=(const memdump&) = delete;
     ~memdump();
@@ -152,7 +152,7 @@ public:
     virtual bool stop_impl() override;
 
     void setup_usermode_dotnet_hooks(const memdump_config* c);
-    void userhook_init(const memdump_config* c, output_format_t output);
+    void userhook_init(const memdump_config* c);
     void userhook_destroy();
     bool userhooks_stop();
 

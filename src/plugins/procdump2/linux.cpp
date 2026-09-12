@@ -104,14 +104,14 @@
 
 #include <libdrakvuf/libdrakvuf.h>
 #include <fcntl.h>
-#include <sys/stat.h>
+
+#include <format>
 
 #include "linux.h"
 
-#include "plugins/output_format.h"
+#include "slog/slog.hpp"
 #include "plugins/plugin_utils.h"
 
-using namespace std::string_literals;
 using namespace procdump2_ns;
 
 static void process_visitor(drakvuf_t drakvuf, addr_t process, void* visitor_ctx)
@@ -137,30 +137,21 @@ std::vector<vmi_pid_t> linux_procdump::get_running_processes()
 
 void linux_procdump::save_file_metadata(std::shared_ptr<linux_procdump_task_t> task)
 {
-    umask(S_IWGRP | S_IWOTH);
-    FILE* fp = fopen((procdump_dir / (task->data_file_name + ".metadata"s)).c_str(), "w");
-    if (!fp)
-    {
-        PRINT_DEBUG("[PROCDUMP] [%d:%d] Failed to open metadata file\n", task->process_data.pid, task->process_data.tid);
-        return;
-    }
+    slog::keyval_array record;
+    record.push_back(slog::attr("DumpSize", slog::hex(task->dump_size)));
+    record.push_back(slog::attr("PID", slog::number(task->process_data.pid)));
+    record.push_back(slog::attr("PPID", slog::number(task->process_data.ppid)));
+    record.push_back(slog::attr("ProcessName", slog::text(task->process_data.name)));
+    record.push_back(slog::attr("TargetPID", slog::number(task->process_data.pid)));
+    record.push_back(slog::attr("TargetName", slog::text(task->process_data.name)));
+    record.push_back(slog::attr("Compression", slog::text(dump_compression_name(dump_compression))));
+    record.push_back(slog::attr("Status", slog::text("Success")));
+    record.push_back(slog::attr("DataFileName", slog::text(task->data_file_name.data())));
+    record.push_back(slog::attr("SequenceNumber", slog::number(task->idx)));
 
-    json_object* jobj = json_object_new_object();
-    json_object_object_add(jobj, "DumpSize", json_object_new_string_fmt("0x%" PRIx64, task->dump_size));
-    json_object_object_add(jobj, "PID", json_object_new_int(task->process_data.pid));
-    json_object_object_add(jobj, "PPID", json_object_new_int(task->process_data.ppid));
-    json_object_object_add(jobj, "ProcessName", json_object_new_string(task->process_data.name));
-    json_object_object_add(jobj, "TargetPID", json_object_new_int(task->process_data.pid));
-    json_object_object_add(jobj, "TargetName", json_object_new_string(task->process_data.name));
-    json_object_object_add(jobj, "Compression", json_object_new_string(dump_compression_name(dump_compression)));
-    json_object_object_add(jobj, "Status", json_object_new_string("Success"));
-    json_object_object_add(jobj, "DataFileName", json_object_new_string(task->data_file_name.data()));
-    json_object_object_add(jobj, "SequenceNumber", json_object_new_int(task->idx));
-
-    fprintf(fp, "%s\n", json_object_get_string(jobj));
-    fclose(fp);
-
-    json_object_put(jobj);
+    if (!slog::write_record(procdump_dir / std::format("{}.metadata", task->data_file_name), record))
+        PRINT_DEBUG("[PROCDUMP] [%d:%d] Failed to write metadata file\n",
+            task->process_data.pid, task->process_data.tid);
 }
 
 void linux_procdump::dump_zero_page(std::shared_ptr<linux_procdump_task_t> task)
@@ -335,8 +326,8 @@ void linux_procdump::print_dump_exclusion(drakvuf_trap_info_t* info)
         , info->proc_data.pid
         , info->proc_data.name
     );
-    fmt::print(m_output_format, "procdump_skip", drakvuf, info,
-        keyval("Message", fmt::Rstr("Excluded by filter"))
+    slog::emit("procdump_skip", drakvuf, info,
+        slog::attr("Message", slog::text("Excluded by filter"))
     );
 }
 
@@ -367,8 +358,8 @@ void linux_procdump::print_dump_failure(addr_t process_base, const std::string& 
         , info.proc_data.pid
         , info.proc_data.name
     );
-    fmt::print(m_output_format, "procdump_fail", drakvuf, &info,
-        keyval("Message", fmt::Rstr(message))
+    slog::emit("procdump_fail", drakvuf, &info,
+        slog::attr("Message", slog::text(message))
     );
 
     g_free(const_cast<char*>(info.proc_data.name));
@@ -392,13 +383,13 @@ void linux_procdump::print_dump_info(std::shared_ptr<linux_procdump_task_t> task
     info.trap = &trap;
     info.proc_data = task->process_data;
 
-    fmt::print(m_output_format, "procdump", drakvuf, &info,
-        keyval("TargetPID", fmt::Nval(task->process_data.pid)),
-        keyval("TargetName", fmt::Estr(task->process_data.name)),
-        keyval("DumpReason", task->reason ? fmt::Estr("TerminateProcess") : fmt::Estr("FinishAnalysis")),
-        keyval("DumpSize", fmt::Nval(task->dump_size)),
-        keyval("SN", fmt::Nval(task->idx)),
-        keyval("Status", fmt::Estr("Success"))
+    slog::emit("procdump", drakvuf, &info,
+        slog::attr("TargetPID", slog::number(task->process_data.pid)),
+        slog::attr("TargetName", slog::text(task->process_data.name)),
+        slog::attr("DumpReason", task->reason ? slog::text("TerminateProcess") : slog::text("FinishAnalysis")),
+        slog::attr("DumpSize", slog::number(task->dump_size)),
+        slog::attr("SN", slog::number(task->idx)),
+        slog::attr("Status", slog::text("Success"))
     );
 
     g_free(const_cast<char*>(info.proc_data.name));
@@ -800,8 +791,8 @@ event_response_t linux_procdump::do_exit_cb(drakvuf_t drakvuf, drakvuf_trap_info
     return VMI_EVENT_RESPONSE_NONE;
 }
 
-linux_procdump::linux_procdump(drakvuf_t drakvuf, const procdump2_config* config, output_format_t output)
-    : pluginex(drakvuf, output)
+linux_procdump::linux_procdump(drakvuf_t drakvuf, const procdump2_config* config)
+    : pluginex(drakvuf)
     , timeout{config->timeout}
     , dump_new_processes_on_finish(config->dump_new_processes_on_finish)
     , procdump_dir{config->procdump_dir ?: ""}

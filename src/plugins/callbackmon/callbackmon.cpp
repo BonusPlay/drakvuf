@@ -104,7 +104,7 @@
 #include <libdrakvuf/libdrakvuf.h>
 #include <libdrakvuf/win.h>
 #include <plugins/plugins_ex.h>
-#include <plugins/output_format.h>
+#include <slog/slog.hpp>
 #include <mutex>
 
 #include "callbackmon.h"
@@ -432,10 +432,9 @@ static void vista_enumerate_object_types_and_callbacks(drakvuf_t drakvuf, const 
         plugin->object_cb.push_back(
         {
             .base = info->base_addr,
-            .name = name ? (const char*)name->contents : "Anonymous",
+            .name = unicode_string(name),
             .callbacks = get_callback_object_callbacks(drakvuf, plugin, info->base_addr)
         });
-        if (name) vmi_free_unicode_str(name);
     }
 
     drakvuf_release_vmi(drakvuf);
@@ -499,17 +498,7 @@ static bool fill_object_type_callbacks(vmi_instance_t vmi, drakvuf_t drakvuf, ca
                 ob_type.callbacks.push_back({ .base = entry, .callback = post_cb });
         }
     }
-    // Fill object type name.
-    //
-    if (auto name = drakvuf_get_object_name(drakvuf, ob_type.base))
-    {
-        ob_type.name = (const char*)name->contents;
-        vmi_free_unicode_str(name);
-    }
-    else
-    {
-        ob_type.name = "Anonymous";
-    }
+    ob_type.name = unicode_string(drakvuf_get_object_name(drakvuf, ob_type.base));
     plugin->object_type.push_back(std::move(ob_type));
     return true;
 }
@@ -539,10 +528,9 @@ static bool consume_object_callbacks(drakvuf_t drakvuf, vmi_instance_t vmi, call
                 plugin->object_cb.push_back(
                 {
                     .base = info->base_addr,
-                    .name = name ? (const char*)name->contents : "Anonymous",
+                    .name = unicode_string(name),
                     .callbacks = get_callback_object_callbacks(drakvuf, plugin, info->base_addr)
                 });
-                if (name) vmi_free_unicode_str(name);
             }
         }, plugin))
         {
@@ -590,43 +578,43 @@ event_response_t callbackmon::load_unload_cb(drakvuf_t drakvuf, drakvuf_trap_inf
         if (VMI_SUCCESS == vmi_read_addr_va(vmi, entry + offsets[LDR_TABLE_ENTRY_DLLBASE],     info->proc_data.pid, &module_info.base) &&
             VMI_SUCCESS == vmi_read_addr_va(vmi, entry + offsets[LDR_TABLE_ENTRY_SIZEOFIMAGE], info->proc_data.pid, &module_info.size))
         {
-            if (auto name = vmi_read_unicode_str_va(vmi, entry + offsets[LDR_TABLE_ENTRY_FULLDLLNAME], info->proc_data.pid))
+            unicode_string name(vmi_read_unicode_str_va(vmi, entry + offsets[LDR_TABLE_ENTRY_FULLDLLNAME], info->proc_data.pid));
+            if (name.get())
             {
-                module_info.name.assign((const char*)name->contents);
+                module_info.name = name;
                 drivers.push_back(std::move(module_info));
-                vmi_free_unicode_str(name);
             }
         }
     }
     return VMI_EVENT_RESPONSE_NONE;
 }
 
-void callbackmon::report(drakvuf_t drakvuf, const char* list_name, addr_t addr, const char* action)
+void callbackmon::report(drakvuf_t drakvuf, const slog::value& list_name, addr_t addr, const char* action)
 {
-    auto get_module_by_addr = [&]() -> callbackmon_module_t
+    auto get_module_by_addr = [&]() -> const callbackmon_module_t*
     {
         for (const auto& module : this->drivers)
         {
             if (addr >= module.base && addr < module.base + module.size)
             {
-                return module;
+                return &module;
             }
         }
-        return { .base = 0, .size = 0, .name = "<Unknown>" };
+        return nullptr;
     };
 
-    const auto& module = get_module_by_addr();
-    fmt::print(format, "callbackmon", drakvuf, nullptr,
-        keyval("Type", fmt::Rstr("Callback")),
-        keyval("ListName", fmt::Estr(list_name)),
-        keyval("Module", fmt::Estr(module.name)),
-        keyval("RVA", fmt::Xval(module.base ? addr - module.base : 0)),
-        keyval("Action", fmt::Estr(action))
+    const callbackmon_module_t* module = get_module_by_addr();
+    slog::emit("callbackmon", drakvuf, nullptr,
+        slog::attr("Type", slog::text("Callback")),
+        slog::attr("ListName", list_name),
+        slog::attr("Module", module ? slog::value(module->name) : slog::null),
+        slog::attr("RVA", slog::hex(module ? addr - module->base : 0)),
+        slog::attr("Action", slog::text(action))
     );
 }
 
-callbackmon::callbackmon(drakvuf_t drakvuf, const callbackmon_config* config, output_format_t output)
-    : pluginex(drakvuf, output), config{ *config }, format{ output }
+callbackmon::callbackmon(drakvuf_t drakvuf, const callbackmon_config* config)
+    : pluginex(drakvuf), config{ *config }
 {
     const addr_t krnl_base = drakvuf_get_kernel_base(drakvuf);
     const size_t ptrsize   = drakvuf_get_address_width(drakvuf);
@@ -821,7 +809,7 @@ callbackmon::callbackmon(drakvuf_t drakvuf, const callbackmon_config* config, ou
         {
             .base = info->base_addr,
             .size = info->size,
-            .name = (const char*)info->full_name->contents
+            .name = info->full_name
         });
         return true;
     }, this);
@@ -833,7 +821,7 @@ bool callbackmon::stop_impl()
     std::unique_ptr<callbackmon> snapshot;
     try
     {
-        snapshot = std::make_unique<callbackmon>(drakvuf, &config, format);
+        snapshot = std::make_unique<callbackmon>(drakvuf, &config);
     }
     catch (const std::exception& e)
     {
@@ -942,7 +930,7 @@ bool callbackmon::stop_impl()
 
         if (new_object != snapshot->object_cb.end())
         {
-            check_callbacks(past_object.callbacks, new_object->callbacks, past_object.name.c_str());
+            check_callbacks(past_object.callbacks, new_object->callbacks, slog::value(past_object.name));
         }
     }
 
@@ -956,8 +944,8 @@ bool callbackmon::stop_impl()
 
         if (new_object != snapshot->object_type.end())
         {
-            check_callbacks(past_object.callbacks, new_object->callbacks, past_object.name.c_str());
-            check_callbacks(past_object.initializer, new_object->initializer, past_object.name.c_str());
+            check_callbacks(past_object.callbacks, new_object->callbacks, slog::value(past_object.name));
+            check_callbacks(past_object.initializer, new_object->initializer, slog::value(past_object.name));
         }
     }
     return true;
